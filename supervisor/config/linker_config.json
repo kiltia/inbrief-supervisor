@@ -1,6 +1,6 @@
 {
-    "openai_config" : {
-        "clustering" : {
+    "openai" : {
+        "dbscan" : {
             "eps" : 0.465,
             "min_samples" : 2,
             "metric" :"euclidean"
@@ -12,8 +12,21 @@
             "min_samples" : 2
         }
     }, 
-    "in-house_config" : {
-        "clustering" : {
+    "ft+mlm" : {
+        "dbscan" : {
+            "eps" : 0.425,
+            "min_samples" : 2,
+            "metric" :"l2"
+        },
+        "bm25" : {
+            "depth" : 3,
+            "threshold" : 0.15,
+            "semantic_threshold" : [0.82, 1.0],
+            "min_samples" : 2
+        }
+    },
+    "mlm" : {
+        "dbscan" : {
             "eps" : 0.425,
             "min_samples" : 2,
             "metric" :"l2"

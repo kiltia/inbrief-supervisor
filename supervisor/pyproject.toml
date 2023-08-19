@@ -1,0 +1,36 @@
+[tool.poetry]
+name = "lab"
+version = "0.1.0"
+description = ""
+authors = ["Nikita Rydanov <wrongwayboyy@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+requests = "^2.31.0"
+pandas = "^2.0.3"
+pydantic-settings = "^2.0.2"
+nltk = "^3.8.1"
+transformers = "^4.31.0"
+torch = [
+    {version = "^2.0.1", source = "pytorch", platform='linux'},
+    {version = "^2.0.1", platform='darwin'}
+]
+scikit-learn = "^1.3.0"
+numpy = "^1.25.2"
+rouge-score = "^0.1.2"
+uvicorn = "^0.23.2"
+fastapi = "^0.101.1"
+
+[[tool.poetry.source]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/nightly/cu121"
+priority = "supplemental"
+
+[[tool.poetry.source]]
+name = "PyPI"
+priority = "default"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
