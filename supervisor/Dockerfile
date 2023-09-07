@@ -9,7 +9,7 @@ ENV WD_NAME=/supervisor
 
 WORKDIR $WD_NAME
 
-COPY poetry.lock pyproject.toml . 
+COPY pyproject.toml poetry.lock* . 
 
 RUN pip install poetry==${POETRY_VERSION}
 RUN poetry config installer.max-workers 10 \

@@ -1,5 +1,5 @@
 import logging
-from typing import List
+from typing import Dict, List
 from uuid import uuid4
 
 import pandas as pd
@@ -7,7 +7,14 @@ import requests
 from config import LinkingSettings, NetworkSettings
 from fastapi import FastAPI, Response
 from fastapi.exceptions import HTTPException
-from models import Density, EmbeddingSource, LinkingMethod, Request, SummaryMethod
+from models import (
+    Density,
+    EmbeddingSource,
+    LinkingMethod,
+    Request,
+    SummaryMethod,
+    SummaryType,
+)
 from utils import LOGGING_FORMAT
 
 app = FastAPI()
@@ -146,27 +153,37 @@ async def serve_request(request: Request, response: Response):
     data = pd.DataFrame.from_dict(
         call_scraper(uuid, embedding_source=config.embedding_source, **body)
     )
-    linked_data = call_linker(
-        uuid, data, config.embedding_source, config.linking_method
+
+    if not data.shape[0]:
+        return {}
+
+    linked_data = (
+        call_linker(uuid, data, config.embedding_source, config.linking_method)
+        if config.linking_method != LinkingMethod.NO_LINKER
+        else data["text"]
     )
 
-    summary = {"storylines": [], "single_news": []}
+    summary: Dict[Density, Dict[SummaryType, list]] = {}
 
-    for story in linked_data["stories"][:-1]:
-        summary["storylines"].append(
-            call_summarizer(uuid, story, config.summary_method, config.density)
-        )
-
-    for post in linked_data["stories"][-1]:
-        summary["single_news"].append(
-            call_summarizer(uuid, [post], config.summary_method, config.density)
-        )
-
-    for group in summary.keys():
-        for i in range(len(summary[group])):
-            summary[group][i]["summary"] = call_editor(
-                uuid, summary[group][i]["summary"], config.editor
+    for density in config.required_density:
+        summary[density] = {SummaryType.STORYLINES: [], SummaryType.SINGLE_NEWS: []}
+        for story in linked_data["stories"][:-1]:
+            summary[density][SummaryType.STORYLINES].append(
+                call_summarizer(uuid, story, config.summary_method, density)
             )
+
+        # NOTE(nrydanov): Probably remove it if we think that single news
+        # shouldn't be summarized same as stories
+        for post in linked_data["stories"][-1]:
+            summary[density][SummaryType.SINGLE_NEWS].append(
+                call_summarizer(uuid, [post], config.summary_method, density)
+            )
+
+        for group in SummaryType:
+            for i in range(len(summary[density][group])):
+                summary[density][group][i]["summary"] = call_editor(
+                    uuid, summary[density][group][i]["summary"], config.editor
+                )
 
     return summary
 

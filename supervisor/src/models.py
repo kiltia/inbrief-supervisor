@@ -1,10 +1,8 @@
-from datetime import datetime
 from enum import Enum
 from typing import List
 
 from pydantic import BaseModel
-from pydantic_settings import BaseSettings
-from utils import DATE_FORMAT, DEFAULT_END_DATE
+from utils import DEFAULT_END_DATE
 
 
 class EmbeddingSource(Enum):
@@ -16,6 +14,7 @@ class EmbeddingSource(Enum):
 class LinkingMethod(Enum):
     DBSCAN = "dbscan"
     BM25 = "bm25"
+    NO_LINKER = "no_linker"
 
 
 class SummaryMethod(Enum):
@@ -29,13 +28,18 @@ class Density(Enum):
     LARGE = "large"
 
 
+class SummaryType(Enum):
+    STORYLINES = "storylines"
+    SINGLE_NEWS = "single_news"
+
+
 class Config(BaseModel):
     # NOTE(nrydanov): Isn't expected to give end-user possibility to choose
     # some of those parameters, but it's required for now
     embedding_source: EmbeddingSource
     linking_method: LinkingMethod
     summary_method: SummaryMethod
-    density: Density
+    required_density: List[Density]
     editor: str
 
 
