@@ -2,8 +2,8 @@ import logging
 from typing import Dict, List
 from uuid import uuid4
 
+import httpx
 import pandas as pd
-import requests
 from config import LinkingSettings, NetworkSettings
 from fastapi import FastAPI, Response
 from fastapi.exceptions import HTTPException
@@ -26,8 +26,8 @@ linking_settings = LinkingSettings("config/linker_config.json")
 
 # TODO(nrydanov): Add detailed verification for all possible situations ()
 def verifiable_request(call):
-    def wrapper(*args, **kwargs):
-        response = call(*args, **kwargs)
+    async def wrapper(*args, **kwargs):
+        response = await call(*args, **kwargs)
         if response.status_code != 200:
             raise HTTPException(
                 500, detail="One of a services is unavailable at the moment."
@@ -50,7 +50,7 @@ def create_url(port, method, host="localhost"):
 
 
 @verifiable_request
-def call_scraper(uuid, **body):
+async def call_scraper(uuid, **body):
     url = create_url(
         network_settings.scraper_port, "scraper/", network_settings.scraper_host
     )
@@ -68,11 +68,12 @@ def call_scraper(uuid, **body):
 
     body.pop("embedding_source")
 
-    return requests.post(url, json=body)
+    async with httpx.AsyncClient() as client:
+        return await client.post(url, json=body, timeout=30)
 
 
 @verifiable_request
-def call_linker(
+async def call_linker(
     uuid, data: pd.DataFrame, embedding_source: EmbeddingSource, method: LinkingMethod
 ):
     logger.info(f"Creating a new linker request ({uuid})")
@@ -104,44 +105,56 @@ def call_linker(
         "method": method.value,
         "config": (config.model_dump())[method.value],
     }
-    response = requests.post(
-        create_url(
-            network_settings.linker_port, "get_stories", network_settings.linker_host
-        ),
-        json=body,
-    )
 
-    return response
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            create_url(
+                network_settings.linker_port,
+                "get_stories",
+                network_settings.linker_host,
+            ),
+            json=body,
+            timeout=30,
+        )
+        return response
 
 
 @verifiable_request
-def call_summarizer(uuid, story: List[str], method: SummaryMethod, density: Density):
+async def call_summarizer(
+    uuid, story: List[str], method: SummaryMethod, density: Density
+):
     logger.info(f"Creating a new summarizer request ({uuid})")
     body = {"story": story, "method": method.value, "density": density.value}
 
-    response = requests.post(
-        create_url(
-            network_settings.summarizer_port,
-            "summarize",
-            network_settings.summarizer_host,
-        ),
-        json=body,
-    )
-
-    return response
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            create_url(
+                network_settings.summarizer_port,
+                "summarize",
+                network_settings.summarizer_host,
+            ),
+            json=body,
+            # NOTE(nrydanov): Maybe it's a bad idea, but I don't really
+            # understand what would be a nice value there
+            timeout=1e9,
+        )
+        return response
 
 
 @verifiable_request
-def call_editor(uuid, summary: str, style: str):
+async def call_editor(uuid, summary: str, style: str):
     logger.info(f"Creating a new editor request ({uuid})")
     body = {"input": summary, "style": style}
 
-    response = requests.post(
-        create_url(network_settings.editor_port, "edit", network_settings.editor_host),
-        json=body,
-    )
-
-    return response
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            create_url(
+                network_settings.editor_port, "edit", network_settings.editor_host
+            ),
+            json=body,
+            timeout=60,
+        )
+        return response
 
 
 @app.post("/api/summarize")
@@ -151,14 +164,14 @@ async def serve_request(request: Request, response: Response):
     body = request.payload.model_dump()
     config = request.config
     data = pd.DataFrame.from_dict(
-        call_scraper(uuid, embedding_source=config.embedding_source, **body)
+        await call_scraper(uuid, embedding_source=config.embedding_source, **body)
     )
 
     if not data.shape[0]:
         return {}
 
     linked_data = (
-        call_linker(uuid, data, config.embedding_source, config.linking_method)
+        await call_linker(uuid, data, config.embedding_source, config.linking_method)
         if config.linking_method != LinkingMethod.NO_LINKER
         else data["text"]
     )
@@ -169,19 +182,19 @@ async def serve_request(request: Request, response: Response):
         summary[density] = {SummaryType.STORYLINES: [], SummaryType.SINGLE_NEWS: []}
         for story in linked_data["stories"][:-1]:
             summary[density][SummaryType.STORYLINES].append(
-                call_summarizer(uuid, story, config.summary_method, density)
+                await call_summarizer(uuid, story, config.summary_method, density)
             )
 
         # NOTE(nrydanov): Probably remove it if we think that single news
         # shouldn't be summarized same as stories
         for post in linked_data["stories"][-1]:
             summary[density][SummaryType.SINGLE_NEWS].append(
-                call_summarizer(uuid, [post], config.summary_method, density)
+                await call_summarizer(uuid, [post], config.summary_method, density)
             )
 
         for group in SummaryType:
             for i in range(len(summary[density][group])):
-                summary[density][group][i]["summary"] = call_editor(
+                summary[density][group][i]["summary"] = await call_editor(
                     uuid, summary[density][group][i]["summary"], config.editor
                 )
 
