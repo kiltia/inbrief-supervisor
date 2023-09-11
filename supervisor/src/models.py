@@ -1,36 +1,9 @@
-from enum import Enum
 from typing import List
 
 from pydantic import BaseModel
-from utils import DEFAULT_END_DATE
 
-
-class EmbeddingSource(Enum):
-    FTMLM = "ft+mlm"
-    OPENAI = "openai"
-    MLM = "mlm"
-
-
-class LinkingMethod(Enum):
-    DBSCAN = "dbscan"
-    BM25 = "bm25"
-    NO_LINKER = "no_linker"
-
-
-class SummaryMethod(Enum):
-    OPENAI = "openai"
-    BART = "bart"
-
-
-class Density(Enum):
-    SMALL = "small"
-    AVERAGE = "average"
-    LARGE = "large"
-
-
-class SummaryType(Enum):
-    STORYLINES = "storylines"
-    SINGLE_NEWS = "single_news"
+from shared.models import Density, EmbeddingSource, LinkingMethod, SummaryMethod
+from shared.utils import DEFAULT_END_DATE
 
 
 class Config(BaseModel):

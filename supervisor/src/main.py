@@ -5,17 +5,18 @@ from uuid import uuid4
 import httpx
 import pandas as pd
 from config import LinkingSettings, NetworkSettings
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Response, status
 from fastapi.exceptions import HTTPException
-from models import (
+from models import Request
+
+from shared.models import (
     Density,
     EmbeddingSource,
     LinkingMethod,
-    Request,
     SummaryMethod,
     SummaryType,
 )
-from utils import LOGGING_FORMAT
+from shared.utils import LOGGING_FORMAT
 
 app = FastAPI()
 logger = logging.getLogger(__name__)
@@ -28,9 +29,10 @@ linking_settings = LinkingSettings("config/linker_config.json")
 def verifiable_request(call):
     async def wrapper(*args, **kwargs):
         response = await call(*args, **kwargs)
-        if response.status_code != 200:
+        if response.status_code != status.HTTP_200_OK:
             raise HTTPException(
-                500, detail="One of a services is unavailable at the moment."
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="One of a services is unavailable at the moment.",
             )
             logger.error(
                 f"Got {response.status_code} after calling to {call.__name__} (args['uuid'])"
@@ -94,7 +96,7 @@ async def call_linker(
         case _:
             possible_values = [e.value for e in EmbeddingSource]
             raise HTTPException(
-                500,
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
                 f"Got unexpected embedding source, available one's: {possible_values}",
             )
 
@@ -114,7 +116,7 @@ async def call_linker(
                 network_settings.linker_host,
             ),
             json=body,
-            timeout=30,
+            timeout=1e12,
         )
         return response
 
@@ -136,7 +138,7 @@ async def call_summarizer(
             json=body,
             # NOTE(nrydanov): Maybe it's a bad idea, but I don't really
             # understand what would be a nice value there
-            timeout=1e9,
+            timeout=1e12,
         )
         return response
 
@@ -152,7 +154,7 @@ async def call_editor(uuid, summary: str, style: str):
                 network_settings.editor_port, "edit", network_settings.editor_host
             ),
             json=body,
-            timeout=60,
+            timeout=1e12,
         )
         return response
 
@@ -168,6 +170,7 @@ async def serve_request(request: Request, response: Response):
     )
 
     if not data.shape[0]:
+        response.status_code = status.HTTP_204_NO_CONTENT
         return {}
 
     linked_data = (
