@@ -16,9 +16,9 @@ There's also a configuration of linking methods hyperparameters for
 Linker service in `linker_config.json` file depending on embedding source.
 
 
-## Bulding
+## Building container
 
-To build just use `docker-compose build`.
+To build just use `sh build.sh` on the project root.
 
 ## Running
 
@@ -34,10 +34,6 @@ and port in Supervisor service configuration.
 But since this service is a part of inbrief project, you may use `docker-compose up/docker-compose start scraper`
 in any child directory. 
 
-NOTE: As this service depends on `openai-api` repo, private ssh key is required
-to build image. You'll need to place `.id_ed25519` in `scraper` directory with
-access to our `openai_api` repository.
-
 ## API
 
 Port: 8000 -> 8000
@@ -46,7 +42,7 @@ Port: 8000 -> 8000
 - `config (dict)` — request configuration
     - `embedding_source (enum)` — one of the following: `"ft+mlm"`, `"openai"`
     - `linking_method (enum)` — responsible for linking posts, one of the following: `"dbscan"`, `"bm25"`
-    - `summary_method (enum)` — responsible for summarazing method, one of the following: `"openai", "in-house"`
+    - `summary_method (enum)` — responsible for summarazing method, one of the following: `"openai"`, `"bart"`
     - `density (enum)` — controls density of summary, one of following: `small`, `average`, `large`
     - `editor (str)` — controls style of output summary
 - `payload (dict)` — contains all other required information for serving request
