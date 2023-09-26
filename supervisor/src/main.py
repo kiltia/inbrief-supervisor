@@ -1,18 +1,18 @@
 import logging
 from typing import Dict, List
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 import pandas as pd
 from config import LinkingSettings, NetworkSettings
 from fastapi import FastAPI, Response, status
 from fastapi.exceptions import HTTPException
-from models import Request
 
 from shared.models import (
     Density,
     EmbeddingSource,
     LinkingMethod,
+    Request,
     SummaryMethod,
     SummaryType,
 )
@@ -25,7 +25,7 @@ network_settings = NetworkSettings(_env_file="config/network.cfg")
 linking_settings = LinkingSettings("config/linker_config.json")
 
 
-# TODO(nrydanov): Add detailed verification for all possible situations ()
+# TODO(nrydanov): Add detailed verification for all possible situations (#80)
 def verifiable_request(call):
     async def wrapper(*args, **kwargs):
         response = await call(*args, **kwargs)
@@ -52,23 +52,31 @@ def create_url(port, method, host="localhost"):
 
 
 @verifiable_request
-async def call_scraper(uuid, **body):
+async def call_scraper(uuid: UUID, request: Request):
     url = create_url(
-        network_settings.scraper_port, "scraper/", network_settings.scraper_host
+        network_settings.scraper_port,
+        "scraper/",
+        network_settings.scraper_host,
     )
     logger.info(f"Creating a new scraper request ({uuid})")
 
-    body = body.copy()
+    config = request.config
 
-    match body["embedding_source"]:
+    body = request.payload.model_dump()
+    body.pop("preset_data")
+
+    body["chat_folder_link"] = request.payload.preset_data.chat_folder_link
+
+    match config.embedding_source:
         case EmbeddingSource.FTMLM:
-            body["required_embedders"] = ["fast-text-embedder", "mini-lm-embedder"]
+            body["required_embedders"] = [
+                "fast-text-embedder",
+                "mini-lm-embedder",
+            ]
         case EmbeddingSource.OPENAI:
             body["required_embedders"] = ["open-ai-embedder"]
         case EmbeddingSource.MLM:
             body["required_embedders"] = ["mini-lm-embedder"]
-
-    body.pop("embedding_source")
 
     async with httpx.AsyncClient() as client:
         return await client.post(url, json=body, timeout=30)
@@ -76,7 +84,10 @@ async def call_scraper(uuid, **body):
 
 @verifiable_request
 async def call_linker(
-    uuid, data: pd.DataFrame, embedding_source: EmbeddingSource, method: LinkingMethod
+    uuid: UUID,
+    data: pd.DataFrame,
+    embedding_source: EmbeddingSource,
+    method: LinkingMethod,
 ):
     logger.info(f"Creating a new linker request ({uuid})")
     embeddings = None
@@ -100,7 +111,7 @@ async def call_linker(
                 f"Got unexpected embedding source, available one's: {possible_values}",
             )
 
-    body = {
+    request = {
         "texts": texts.tolist(),
         "dates": dates.tolist(),
         "embeddings": embeddings.tolist(),
@@ -115,7 +126,7 @@ async def call_linker(
                 "get_stories",
                 network_settings.linker_host,
             ),
-            json=body,
+            json=request,
             timeout=1e12,
         )
         return response
@@ -123,7 +134,7 @@ async def call_linker(
 
 @verifiable_request
 async def call_summarizer(
-    uuid, story: List[str], method: SummaryMethod, density: Density
+    uuid: UUID, story: List[str], method: SummaryMethod, density: Density
 ):
     logger.info(f"Creating a new summarizer request ({uuid})")
     body = {"story": story, "method": method.value, "density": density.value}
@@ -144,14 +155,16 @@ async def call_summarizer(
 
 
 @verifiable_request
-async def call_editor(uuid, summary: str, style: str):
+async def call_editor(uuid: UUID, summary: str, style: str):
     logger.info(f"Creating a new editor request ({uuid})")
     body = {"input": summary, "style": style}
 
     async with httpx.AsyncClient() as client:
         response = await client.post(
             create_url(
-                network_settings.editor_port, "edit", network_settings.editor_host
+                network_settings.editor_port,
+                "edit",
+                network_settings.editor_host,
             ),
             json=body,
             timeout=1e12,
@@ -163,42 +176,50 @@ async def call_editor(uuid, summary: str, style: str):
 async def serve_request(request: Request, response: Response):
     uuid = uuid4()
     logger.info(f"Started serving request, generated uuid: {uuid}")
-    body = request.payload.model_dump()
-    config = request.config
-    data = pd.DataFrame.from_dict(
-        await call_scraper(uuid, embedding_source=config.embedding_source, **body)
-    )
+    config, payload = request.config, request.payload
+    data = pd.DataFrame.from_dict(await call_scraper(uuid, request))
 
     if not data.shape[0]:
         response.status_code = status.HTTP_204_NO_CONTENT
         return {}
 
     linked_data = (
-        await call_linker(uuid, data, config.embedding_source, config.linking_method)
+        await call_linker(
+            uuid, data, config.embedding_source, config.linking_method
+        )
         if config.linking_method != LinkingMethod.NO_LINKER
         else data["text"]
     )
 
     summary: Dict[Density, Dict[SummaryType, list]] = {}
 
-    for density in config.required_density:
-        summary[density] = {SummaryType.STORYLINES: [], SummaryType.SINGLE_NEWS: []}
+    for density in request.required_density:
+        summary[density] = {
+            SummaryType.STORYLINES: [],
+            SummaryType.SINGLE_NEWS: [],
+        }
         for story in linked_data["stories"][:-1]:
             summary[density][SummaryType.STORYLINES].append(
-                await call_summarizer(uuid, story, config.summary_method, density)
+                await call_summarizer(
+                    uuid, story, config.summary_method, density
+                )
             )
 
         # NOTE(nrydanov): Probably remove it if we think that single news
         # shouldn't be summarized same as stories
         for post in linked_data["stories"][-1]:
             summary[density][SummaryType.SINGLE_NEWS].append(
-                await call_summarizer(uuid, [post], config.summary_method, density)
+                await call_summarizer(
+                    uuid, [post], config.summary_method, density
+                )
             )
 
         for group in SummaryType:
             for i in range(len(summary[density][group])):
                 summary[density][group][i]["summary"] = await call_editor(
-                    uuid, summary[density][group][i]["summary"], config.editor
+                    uuid,
+                    summary[density][group][i]["summary"],
+                    payload.preset_data.editor_prompt,
                 )
 
     return summary
@@ -207,5 +228,8 @@ async def serve_request(request: Request, response: Response):
 @app.on_event("startup")
 async def main() -> None:
     logging.basicConfig(
-        format=LOGGING_FORMAT, datefmt="%m-%d %H:%M:%S", level=logging.INFO, force=True
+        format=LOGGING_FORMAT,
+        datefmt="%m-%d %H:%M:%S",
+        level=logging.INFO,
+        force=True,
     )
