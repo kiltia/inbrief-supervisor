@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 import httpx
 import pandas as pd
 from config import LinkingSettings, NetworkSettings
+from utils import get_references
 from fastapi import FastAPI, Response, status
 from fastapi.exceptions import HTTPException
 
@@ -177,6 +178,7 @@ async def serve_request(request: Request, response: Response):
     uuid = uuid4()
     logger.info(f"Started serving request, generated uuid: {uuid}")
     config, payload = request.config, request.payload
+    request.required_density = request.required_density[::-1]
     data = pd.DataFrame.from_dict(await call_scraper(uuid, request))
 
     if not data.shape[0]:
@@ -190,29 +192,45 @@ async def serve_request(request: Request, response: Response):
         if config.linking_method != LinkingMethod.NO_LINKER
         else data["text"]
     )
+    storylines = linked_data["stories"][:-1]
+    single_news = linked_data["stories"][-1]
+
+    logger.info(
+        f"Got {len(storylines)} storylines and {len(single_news)} single news"
+    )
+
+    references = get_references(
+        linked_data["stories_nums"], data["references"].values
+    )
 
     summary: Dict[Density, Dict[SummaryType, list]] = {}
-
     for density in request.required_density:
+        logger.info(f"Started generating {density.value} summaries")
         summary[density] = {
             SummaryType.STORYLINES: [],
             SummaryType.SINGLE_NEWS: [],
         }
-        for story in linked_data["stories"][:-1]:
-            summary[density][SummaryType.STORYLINES].append(
-                await call_summarizer(
-                    uuid, story, config.summary_method, density
-                )
+        for i in range(len(storylines)):
+            summary_story = await call_summarizer(
+                uuid, storylines[i], config.summary_method, density
             )
+            summary_story["references"] = references[i]
+            summary[density][SummaryType.STORYLINES].append(summary_story)
+            storylines[i] = [summary_story["summary"]]
 
         # NOTE(nrydanov): Probably remove it if we think that single news
         # shouldn't be summarized same as stories
-        for post in linked_data["stories"][-1]:
-            summary[density][SummaryType.SINGLE_NEWS].append(
-                await call_summarizer(
-                    uuid, [post], config.summary_method, density
-                )
+        for i in range(len(single_news)):
+            summary_news = await call_summarizer(
+                uuid, [single_news[i]], config.summary_method, density
             )
+            summary_news["references"] = [references[-1][i]]
+            summary[density][SummaryType.SINGLE_NEWS].append(summary_news)
+            single_news[i] = summary_news["summary"]
+
+        logger.info(f"Finished generating {density.value} summaries")
+
+        logger.info(f"Started editing {density.value} summaries")
 
         for group in SummaryType:
             for i in range(len(summary[density][group])):
@@ -221,6 +239,9 @@ async def serve_request(request: Request, response: Response):
                     summary[density][group][i]["summary"],
                     payload.preset_data.editor_prompt,
                 )
+
+        logger.info(f"Finished editing {density.value} summaries")
+    logger.info(f"Sending response with summarized news")
 
     return summary
 
