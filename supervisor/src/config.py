@@ -1,8 +1,9 @@
-import json
 from typing import List
 
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
+
+from shared.models import JSONSettings
 
 
 class NetworkSettings(BaseSettings):
@@ -34,15 +35,7 @@ class LinkerSettings(BaseModel):
     dbscan: DBScanSettings
 
 
-class LinkingSettings(BaseModel):
+class LinkingSettings(JSONSettings):
     openai: LinkerSettings
     ftmlm: LinkerSettings = Field(alias="ft+mlm")
     mlm: LinkerSettings
-
-    def __init__(self, path: str):
-        with open(path, "r") as f:
-            config_data = json.load(f)
-            return super().__init__(**config_data)
-
-    class Config:
-        populate_by_name = True

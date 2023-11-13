@@ -1,44 +1,125 @@
+import json
 import logging
+import random
+from datetime import datetime
 from typing import Dict, List
 from uuid import UUID, uuid4
 
 import httpx
-import pandas as pd
-from config import LinkingSettings, NetworkSettings
-from utils import get_references
+from asgi_correlation_id import CorrelationIdMiddleware, correlation_id
+from databases import Database
 from fastapi import FastAPI, Response, status
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import HTTPException
+from fastapi.responses import JSONResponse
+from pydantic import TypeAdapter
+from utils import REQUEST_TIMEOUT, form_linking_request, form_scraper_request
 
+from config import LinkingSettings, NetworkSettings
+from shared.db import PgRepository, create_db_string
+from shared.entities import (
+    Callback,
+    Config,
+    Preset,
+    Summary,
+    User,
+    UserPreset,
+    UserPresets,
+)
+from shared.logging import configure_logging
 from shared.models import (
+    CallbackPatchRequest,
+    CallbackPostRequest,
+    ChangePresetRequest,
     Density,
     EmbeddingSource,
+    FetchRequest,
     LinkingMethod,
-    Request,
-    SummaryMethod,
-    SummaryType,
+    PartialPresetUpdate,
+    PresetData,
+    SummarizeRequest,
+    UserRequest,
 )
-from shared.utils import LOGGING_FORMAT
+from shared.resources import SharedResources
+from shared.routes import (
+    EditorRoutes,
+    LinkerRoutes,
+    ScraperRoutes,
+    SummarizerRoutes,
+    SupervisorRoutes,
+)
+from shared.utils import DB_DATE_FORMAT, SHARED_CONFIG_PATH
 
 app = FastAPI()
-logger = logging.getLogger(__name__)
+app.add_middleware(CorrelationIdMiddleware)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request, exc: Exception) -> JSONResponse:
+    return await http_exception_handler(
+        request,
+        HTTPException(
+            500,
+            "Internal server error",
+            headers={"X-Request-ID": correlation_id.get() or ""},
+        ),
+    )
+
+
+logger = logging.getLogger("app")
 
 network_settings = NetworkSettings(_env_file="config/network.cfg")
 linking_settings = LinkingSettings("config/linker_config.json")
+
+
+class Context:
+    def __init__(self) -> None:
+        self.shared_settings = SharedResources(
+            f"{SHARED_CONFIG_PATH}/settings.json"
+        )
+        self.pg = Database(create_db_string(self.shared_settings.pg_creds))
+        self.callback_repository = PgRepository(self.pg, Callback._table_name)
+        self.preset_view = PgRepository(self.pg, UserPresets._table_name)
+        self.user_repo = PgRepository(self.pg, User._table_name)
+        self.preset_repo = PgRepository(self.pg, Preset._table_name)
+        self.up_repo = PgRepository(self.pg, UserPreset._table_name)
+        self.config_repo = PgRepository(self.pg, Config._table_name)
+        self.summary_repo = PgRepository(self.pg, Summary._table_name)
+
+    async def init_db(self) -> None:
+        await self.pg.connect()
+
+    async def dispose_db(self) -> None:
+        await self.pg.disconnect()
+
+
+ctx = Context()
 
 
 # TODO(nrydanov): Add detailed verification for all possible situations (#80)
 def verifiable_request(call):
     async def wrapper(*args, **kwargs):
         response = await call(*args, **kwargs)
-        if response.status_code != status.HTTP_200_OK:
-            raise HTTPException(
-                status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="One of a services is unavailable at the moment.",
-            )
-            logger.error(
-                f"Got {response.status_code} after calling to {call.__name__} (args['uuid'])"
-            )
-        return response.json()
+        match response.status_code:
+            case status.HTTP_200_OK:
+                return response.json()
+            case status.HTTP_204_NO_CONTENT:
+                logger.warning(
+                    f"Got no content response after calling to {call.__name__}"
+                )
+                raise HTTPException(
+                    status.HTTP_204_NO_CONTENT,
+                    detail=f"{call.__name__} returned no content response",
+                )
+            case _:
+                logger.error(
+                    f"Got {response.status_code} after calling to {call.__name__}"
+                )
+                return HTTPException(
+                    status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"{call.__name__} is unavailable at the moment.",
+                    headers={"X-Request-ID": correlation_id.get() or ""},
+                )
 
     return wrapper
 
@@ -49,208 +130,320 @@ async def hello():
 
 
 def create_url(port, method, host="localhost"):
-    return f"http://{host}:{port}/{method}"
+    return f"http://{host}:{port}{method}"
 
 
 @verifiable_request
-async def call_scraper(uuid: UUID, request: Request):
+async def call_scraper(
+    corr_id: UUID, request: FetchRequest, embedding_source: EmbeddingSource
+):
     url = create_url(
         network_settings.scraper_port,
-        "scraper/",
+        ScraperRoutes.PARSE,
         network_settings.scraper_host,
     )
-    logger.info(f"Creating a new scraper request ({uuid})")
+    logger.info("Creating a new scraper request")
 
-    config = request.config
+    user: User = (await ctx.user_repo.get(User, "chat_id", request.chat_id))[0]
 
-    body = request.payload.model_dump()
-    body.pop("preset_data")
-
-    body["chat_folder_link"] = request.payload.preset_data.chat_folder_link
-
-    match config.embedding_source:
-        case EmbeddingSource.FTMLM:
-            body["required_embedders"] = [
-                "fast-text-embedder",
-                "mini-lm-embedder",
-            ]
-        case EmbeddingSource.OPENAI:
-            body["required_embedders"] = ["open-ai-embedder"]
-        case EmbeddingSource.MLM:
-            body["required_embedders"] = ["mini-lm-embedder"]
+    preset: Preset = (
+        await ctx.preset_repo.get(Preset, "preset_id", str(user.cur_preset))
+    )[0]
 
     async with httpx.AsyncClient() as client:
-        return await client.post(url, json=body, timeout=30)
+        channels = await client.post(
+            create_url(
+                network_settings.scraper_port,
+                ScraperRoutes.SYNC,
+                network_settings.scraper_host,
+            ),
+            json={"chat_folder_link": preset.chat_folder_link},
+            timeout=REQUEST_TIMEOUT,
+            headers={"X-Request-ID": corr_id},
+        )
+
+        body = form_scraper_request(request, embedding_source, channels)
+
+        return await client.post(
+            url,
+            json=body,
+            timeout=REQUEST_TIMEOUT,
+            headers={"X-Request-ID": corr_id},
+        )
 
 
 @verifiable_request
 async def call_linker(
-    uuid: UUID,
-    data: pd.DataFrame,
+    corr_id: UUID,
+    data: dict,
     embedding_source: EmbeddingSource,
     method: LinkingMethod,
 ):
-    logger.info(f"Creating a new linker request ({uuid})")
-    embeddings = None
+    logger.info("Creating a new linker request")
 
-    texts = data["text"]
-    dates = data["date"]
-    match embedding_source:
-        case EmbeddingSource.FTMLM:
-            embeddings = data["mini-lm-embedder"] + data["fast-text-embedder"]
-            config = linking_settings.ftmlm
-        case EmbeddingSource.OPENAI:
-            embeddings = data["open-ai-embedder"]
-            config = linking_settings.openai
-        case EmbeddingSource.MLM:
-            embeddings = data["mini-lm-embedder"]
-            config = linking_settings.mlm
-        case _:
-            possible_values = [e.value for e in EmbeddingSource]
-            raise HTTPException(
-                status.HTTP_500_INTERNAL_SERVER_ERROR,
-                f"Got unexpected embedding source, available one's: {possible_values}",
-            )
+    # NOTE(nrydanov): List of dict -> dict of list conversion.
+    # Those actions are obvious overhead, but it won't be visible for now
+    data = {k: [entity[k] for entity in data] for k in data[0]}
+    data["embeddings"] = list(map(lambda x: json.loads(x), data["embeddings"]))
 
-    request = {
-        "texts": texts.tolist(),
-        "dates": dates.tolist(),
-        "embeddings": embeddings.tolist(),
-        "method": method.value,
-        "config": (config.model_dump())[method.value],
+    data["embeddings"] = {
+        k: [entity[k] for entity in data["embeddings"]]
+        for k in data["embeddings"][0]
     }
+
+    request = form_linking_request(
+        data, embedding_source, linking_settings, method
+    )
 
     async with httpx.AsyncClient() as client:
         response = await client.post(
             create_url(
                 network_settings.linker_port,
-                "get_stories",
+                LinkerRoutes.GET_STORIES,
                 network_settings.linker_host,
             ),
             json=request,
-            timeout=1e12,
+            timeout=REQUEST_TIMEOUT,
+            headers={"X-Request-ID": corr_id},
         )
         return response
 
 
 @verifiable_request
 async def call_summarizer(
-    uuid: UUID, story: List[str], method: SummaryMethod, density: Density
+    corr_id: UUID,
+    story_id: UUID,
+    summary_id: UUID,
+    chat_id: int,
+    config_id: UUID,
+    density: Density,
 ):
-    logger.info(f"Creating a new summarizer request ({uuid})")
-    body = {"story": story, "method": method.value, "density": density.value}
+    logger.info("Creating a new summarizer request")
+    body = {
+        "story_id": str(story_id),
+        "config_id": config_id,
+        "density": density.value,
+        "summary_id": str(summary_id),
+        "chat_id": chat_id,
+    }
 
     async with httpx.AsyncClient() as client:
         response = await client.post(
             create_url(
                 network_settings.summarizer_port,
-                "summarize",
+                SummarizerRoutes.SUMMARIZE,
                 network_settings.summarizer_host,
             ),
             json=body,
             # NOTE(nrydanov): Maybe it's a bad idea, but I don't really
             # understand what would be a nice value there
-            timeout=1e12,
+            timeout=REQUEST_TIMEOUT,
+            headers={"X-Request-ID": corr_id},
         )
         return response
 
 
 @verifiable_request
-async def call_editor(uuid: UUID, summary: str, style: str):
-    logger.info(f"Creating a new editor request ({uuid})")
-    body = {"input": summary, "style": style}
+async def call_editor(
+    corr_id: UUID, summary_id: str, style: str, density: Density
+):
+    logger.info("Creating a new editor request")
+    body = {
+        "style": style,
+        "summary_id": str(summary_id),
+        "density": density.value,
+    }
 
     async with httpx.AsyncClient() as client:
         response = await client.post(
             create_url(
                 network_settings.editor_port,
-                "edit",
+                EditorRoutes.EDIT,
                 network_settings.editor_host,
             ),
             json=body,
-            timeout=1e12,
+            timeout=REQUEST_TIMEOUT,
+            headers={"X-Request-ID": corr_id},
         )
         return response
 
 
-@app.post("/api/summarize")
-async def serve_request(request: Request, response: Response):
-    uuid = uuid4()
-    logger.info(f"Started serving request, generated uuid: {uuid}")
-    config, payload = request.config, request.payload
-    request.required_density = request.required_density[::-1]
-    data = pd.DataFrame.from_dict(await call_scraper(uuid, request))
+@app.post(SupervisorRoutes.USER, status_code=204)
+async def register(request: UserRequest):
+    chat_id = request.chat_id
+    user = await ctx.user_repo.get(User, "chat_id", chat_id)
+    if not user:
+        await ctx.user_repo.add(User(chat_id=chat_id))
 
-    if not data.shape[0]:
+
+@app.get(SupervisorRoutes.USER + "/{chat_id}/presets")
+async def get_presets(chat_id: int):
+    response = {}
+    response["presets"] = await ctx.preset_view.get(
+        UserPresets, "chat_id", chat_id
+    )
+    user: List[User] = await ctx.user_repo.get(User, "chat_id", chat_id)
+    response["cur_preset"] = user[0].cur_preset
+    return response
+
+
+@app.get(SupervisorRoutes.SUMMARIZE)
+async def get_cached_summary(density: Density, summary_id: UUID):
+    response = await ctx.summary_repo.get(Summary, "summary_id", summary_id)
+
+    return list(filter(lambda x: x.density == density, response))[0]
+
+
+@app.patch(SupervisorRoutes.USER + "/{chat_id}/presets", status_code=204)
+async def change_preset(chat_id: int, request: ChangePresetRequest):
+    user: User = (await ctx.user_repo.get(User, "chat_id", chat_id))[0]
+    user.cur_preset = request.cur_preset
+    await ctx.user_repo.update(user, fields=["cur_preset"])
+
+
+@app.patch(SupervisorRoutes.PRESET, status_code=204)
+async def update_preset(request: PartialPresetUpdate):
+    presets = await ctx.preset_repo.get(Preset, "preset_id", request.preset_id)
+    preset = presets[0]
+
+    request_dump = request.model_dump()
+    preset_dump = preset.model_dump()
+    for key, value in request_dump.items():
+        if value is not None:
+            preset_dump[key] = value
+
+    request_dump.pop("chat_id")
+    keys = request_dump.keys()
+
+    return await ctx.preset_repo.update(
+        TypeAdapter(Preset).validate_python(preset_dump), keys
+    )
+
+
+@app.post(SupervisorRoutes.PRESET, status_code=204)
+async def add_preset(chat_id: int, preset: PresetData):
+    preset_id = uuid4()
+    async with httpx.AsyncClient() as client:
+        await client.post(
+            create_url(
+                network_settings.scraper_port,
+                ScraperRoutes.SYNC,
+                network_settings.scraper_host,
+            ),
+            json={"chat_folder_link": preset.chat_folder_link},
+            timeout=REQUEST_TIMEOUT,
+        )
+    await ctx.preset_repo.add(
+        Preset(
+            preset_id=preset_id,
+            date_created=datetime.now().strftime(DB_DATE_FORMAT),
+            **preset.model_dump(),
+        ),
+    )
+    await ctx.up_repo.add(UserPreset(chat_id=chat_id, preset_id=preset_id))
+
+
+@app.post(SupervisorRoutes.FETCH)
+async def fetch(request: FetchRequest, response: Response):
+    corr_id = correlation_id.get()
+    logger.info("Started fetching updates")
+    configs: List[Config] = await ctx.config_repo.get(Config)
+    config: Config = random.choice(configs)
+    data = await call_scraper(
+        corr_id, request, EmbeddingSource(config.embedding_source)
+    )
+
+    if data == []:
         response.status_code = status.HTTP_204_NO_CONTENT
         return {}
 
     linked_data = (
         await call_linker(
-            uuid, data, config.embedding_source, config.linking_method
+            corr_id,
+            data,
+            EmbeddingSource(config.embedding_source),
+            LinkingMethod(config.linking_method),
         )
         if config.linking_method != LinkingMethod.NO_LINKER
         else data["text"]
     )
-    storylines = linked_data["stories"][:-1]
-    single_news = linked_data["stories"][-1]
 
-    logger.info(
-        f"Got {len(storylines)} storylines and {len(single_news)} single news"
-    )
+    return {"config_id": config.config_id, "story_ids": linked_data}
 
-    references = get_references(
-        linked_data["stories_nums"], data["references"].values
-    )
 
-    summary: Dict[Density, Dict[SummaryType, list]] = {}
+@app.post(SupervisorRoutes.SUMMARIZE)
+async def summarize(request: SummarizeRequest):
+    corr_id = correlation_id.get()
+    summary_id = uuid4()
+    logger.info("Started serving request")
+    request.required_density = request.required_density[::-1]
+
+    config: Config = (
+        await ctx.config_repo.get(Config, "config_id", request.config_id)
+    )[0]
+    user: User = (await ctx.user_repo.get(User, "chat_id", request.chat_id))[0]
+    preset: Preset = (
+        await ctx.preset_repo.get(Preset, "preset_id", user.cur_preset)
+    )[0]
+    summary: Dict[Density, Dict[str, str]] = {}
     for density in request.required_density:
-        logger.info(f"Started generating {density.value} summaries")
-        summary[density] = {
-            SummaryType.STORYLINES: [],
-            SummaryType.SINGLE_NEWS: [],
-        }
-        for i in range(len(storylines)):
-            summary_story = await call_summarizer(
-                uuid, storylines[i], config.summary_method, density
-            )
-            summary_story["references"] = references[i]
-            summary[density][SummaryType.STORYLINES].append(summary_story)
-            storylines[i] = [summary_story["summary"]]
+        logger.info(f"Started generating {density.value} summary")
+        summary_story = await call_summarizer(
+            corr_id,
+            request.story_id,
+            summary_id,
+            request.chat_id,
+            config.config_id,
+            density,
+        )
+        summary[density] = summary_story
+        logger.info(f"Finished generating {density.value} summary")
+        logger.info(f"Started editing {density.value} summary")
+        summary[density]["summary"] = await call_editor(
+            corr_id, summary_id, preset.editor_prompt, density
+        )
+        logger.info(f"Finished editing {density.value} summary")
+    summary["summary_id"] = summary_id
 
-        # NOTE(nrydanov): Probably remove it if we think that single news
-        # shouldn't be summarized same as stories
-        for i in range(len(single_news)):
-            summary_news = await call_summarizer(
-                uuid, [single_news[i]], config.summary_method, density
-            )
-            summary_news["references"] = [references[-1][i]]
-            summary[density][SummaryType.SINGLE_NEWS].append(summary_news)
-            single_news[i] = summary_news["summary"]
-
-        logger.info(f"Finished generating {density.value} summaries")
-
-        logger.info(f"Started editing {density.value} summaries")
-
-        for group in SummaryType:
-            for i in range(len(summary[density][group])):
-                summary[density][group][i]["summary"] = await call_editor(
-                    uuid,
-                    summary[density][group][i]["summary"],
-                    payload.preset_data.editor_prompt,
-                )
-
-        logger.info(f"Finished editing {density.value} summaries")
-    logger.info(f"Sending response with summarized news")
+    logger.info("Sending response with summarized news")
 
     return summary
 
 
+@app.post(SupervisorRoutes.CALLBACK)
+async def set_callback(request: CallbackPostRequest):
+    callback_id = uuid4()
+    callback_row = Callback(
+        callback_id=callback_id,
+        callback_data=json.dumps(request.callback_data),
+    )
+    await ctx.callback_repository.add(callback_row)
+    return callback_id
+
+
+@app.get(SupervisorRoutes.CALLBACK + "/{callback_id}")
+async def get_callback(callback_id):
+    callback_data = await ctx.callback_repository.get(
+        Callback, "callback_id", callback_id
+    )
+    return json.loads(callback_data[0].callback_data)
+
+
+@app.patch(SupervisorRoutes.CALLBACK, status_code=204)
+async def update_callback(request: CallbackPatchRequest):
+    callback_row = Callback(
+        callback_id=request.callback_id,
+        callback_data=json.dumps(request.callback_data),
+    )
+    await ctx.callback_repository.update(callback_row, ["callback_data"])
+
+
 @app.on_event("startup")
 async def main() -> None:
-    logging.basicConfig(
-        format=LOGGING_FORMAT,
-        datefmt="%m-%d %H:%M:%S",
-        level=logging.INFO,
-        force=True,
-    )
+    configure_logging()
+    await ctx.init_db()
+
+
+@app.on_event("shutdown")
+async def disconnect() -> None:
+    await ctx.dispose_db()
