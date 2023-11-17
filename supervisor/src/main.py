@@ -13,7 +13,12 @@ from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import TypeAdapter
-from utils import REQUEST_TIMEOUT, form_linking_request, form_scraper_request
+from utils import (
+    REQUEST_TIMEOUT,
+    chain_correlations,
+    form_linking_request,
+    form_scraper_request,
+)
 
 from config import LinkingSettings, NetworkSettings
 from shared.db import PgRepository, create_db_string
@@ -51,7 +56,7 @@ from shared.routes import (
 from shared.utils import DB_DATE_FORMAT, SHARED_CONFIG_PATH
 
 app = FastAPI()
-app.add_middleware(CorrelationIdMiddleware)
+app.add_middleware(CorrelationIdMiddleware, validator=None)
 
 
 @app.exception_handler(Exception)
@@ -142,7 +147,7 @@ async def call_scraper(
         ScraperRoutes.PARSE,
         network_settings.scraper_host,
     )
-    logger.info("Creating a new scraper request")
+    logger.debug("Creating a new scraper request")
 
     user: User = (await ctx.user_repo.get(User, "chat_id", request.chat_id))[0]
 
@@ -168,7 +173,9 @@ async def call_scraper(
             url,
             json=body,
             timeout=REQUEST_TIMEOUT,
-            headers={"X-Request-ID": corr_id},
+            headers={
+                "X-Request-ID": chain_correlations(corr_id, uuid4().hex[:4])
+            },
         )
 
 
@@ -179,7 +186,7 @@ async def call_linker(
     embedding_source: EmbeddingSource,
     method: LinkingMethod,
 ):
-    logger.info("Creating a new linker request")
+    logger.debug("Creating a new linker request")
 
     # NOTE(nrydanov): List of dict -> dict of list conversion.
     # Those actions are obvious overhead, but it won't be visible for now
@@ -204,7 +211,9 @@ async def call_linker(
             ),
             json=request,
             timeout=REQUEST_TIMEOUT,
-            headers={"X-Request-ID": corr_id},
+            headers={
+                "X-Request-ID": chain_correlations(corr_id, uuid4().hex[:4])
+            },
         )
         return response
 
@@ -218,7 +227,7 @@ async def call_summarizer(
     config_id: UUID,
     density: Density,
 ):
-    logger.info("Creating a new summarizer request")
+    logger.debug("Creating a new summarizer request")
     body = {
         "story_id": str(story_id),
         "config_id": config_id,
@@ -238,7 +247,9 @@ async def call_summarizer(
             # NOTE(nrydanov): Maybe it's a bad idea, but I don't really
             # understand what would be a nice value there
             timeout=REQUEST_TIMEOUT,
-            headers={"X-Request-ID": corr_id},
+            headers={
+                "X-Request-ID": chain_correlations(corr_id, uuid4().hex[:4])
+            },
         )
         return response
 
@@ -247,7 +258,7 @@ async def call_summarizer(
 async def call_editor(
     corr_id: UUID, summary_id: str, style: str, density: Density
 ):
-    logger.info("Creating a new editor request")
+    logger.debug("Creating a new editor request")
     body = {
         "style": style,
         "summary_id": str(summary_id),
@@ -263,7 +274,9 @@ async def call_editor(
             ),
             json=body,
             timeout=REQUEST_TIMEOUT,
-            headers={"X-Request-ID": corr_id},
+            headers={
+                "X-Request-ID": chain_correlations(corr_id, uuid4().hex[:4])
+            },
         )
         return response
 
@@ -346,7 +359,7 @@ async def add_preset(chat_id: int, preset: PresetData):
 @app.post(SupervisorRoutes.FETCH)
 async def fetch(request: FetchRequest, response: Response):
     corr_id = correlation_id.get()
-    logger.info("Started fetching updates")
+    logger.debug("Started fetching updates")
     configs: List[Config] = await ctx.config_repo.get(Config)
     config: Config = random.choice(configs)
     data = await call_scraper(
@@ -375,7 +388,7 @@ async def fetch(request: FetchRequest, response: Response):
 async def summarize(request: SummarizeRequest):
     corr_id = correlation_id.get()
     summary_id = uuid4()
-    logger.info("Started serving request")
+    logger.debug("Started serving request")
     request.required_density = request.required_density[::-1]
 
     config: Config = (
@@ -387,7 +400,7 @@ async def summarize(request: SummarizeRequest):
     )[0]
     summary: Dict[Density, Dict[str, str]] = {}
     for density in request.required_density:
-        logger.info(f"Started generating {density.value} summary")
+        logger.debug(f"Started generating {density.value} summary")
         summary_story = await call_summarizer(
             corr_id,
             request.story_id,
@@ -397,15 +410,15 @@ async def summarize(request: SummarizeRequest):
             density,
         )
         summary[density] = summary_story
-        logger.info(f"Finished generating {density.value} summary")
-        logger.info(f"Started editing {density.value} summary")
+        logger.debug(f"Finished generating {density.value} summary")
+        logger.debug(f"Started editing {density.value} summary")
         summary[density]["summary"] = await call_editor(
             corr_id, summary_id, preset.editor_prompt, density
         )
-        logger.info(f"Finished editing {density.value} summary")
+        logger.debug(f"Finished editing {density.value} summary")
     summary["summary_id"] = summary_id
 
-    logger.info("Sending response with summarized news")
+    logger.debug("Sending response with summarized news")
 
     return summary
 

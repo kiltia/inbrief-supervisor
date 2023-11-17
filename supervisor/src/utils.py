@@ -61,3 +61,7 @@ def form_linking_request(
         "embeddings": embeddings,
         "config": (config.model_dump())[method.value],
     }
+
+
+def chain_correlations(parent, children):
+    return f"{parent} : {children}"
