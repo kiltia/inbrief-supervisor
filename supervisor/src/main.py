@@ -83,13 +83,13 @@ class Context:
             f"{SHARED_CONFIG_PATH}/settings.json"
         )
         self.pg = Database(create_db_string(self.shared_settings.pg_creds))
-        self.callback_repository = PgRepository(self.pg, Callback._table_name)
-        self.preset_view = PgRepository(self.pg, UserPresets._table_name)
-        self.user_repo = PgRepository(self.pg, User._table_name)
-        self.preset_repo = PgRepository(self.pg, Preset._table_name)
-        self.up_repo = PgRepository(self.pg, UserPreset._table_name)
-        self.config_repo = PgRepository(self.pg, Config._table_name)
-        self.summary_repo = PgRepository(self.pg, Summary._table_name)
+        self.callback_repository = PgRepository(self.pg, Callback)
+        self.preset_view = PgRepository(self.pg, UserPresets)
+        self.user_repo = PgRepository(self.pg, User)
+        self.preset_repo = PgRepository(self.pg, Preset)
+        self.up_repo = PgRepository(self.pg, UserPreset)
+        self.config_repo = PgRepository(self.pg, Config)
+        self.summary_repo = PgRepository(self.pg, Summary)
 
     async def init_db(self) -> None:
         await self.pg.connect()
@@ -149,10 +149,10 @@ async def call_scraper(
     )
     logger.debug("Creating a new scraper request")
 
-    user: User = (await ctx.user_repo.get(User, "chat_id", request.chat_id))[0]
+    user: User = (await ctx.user_repo.get("chat_id", request.chat_id))[0]
 
     preset: Preset = (
-        await ctx.preset_repo.get(Preset, "preset_id", str(user.cur_preset))
+        await ctx.preset_repo.get("preset_id", str(user.cur_preset))
     )[0]
 
     async with httpx.AsyncClient() as client:
@@ -284,7 +284,7 @@ async def call_editor(
 @app.post(SupervisorRoutes.USER, status_code=204)
 async def register(request: UserRequest):
     chat_id = request.chat_id
-    user = await ctx.user_repo.get(User, "chat_id", chat_id)
+    user = await ctx.user_repo.get("chat_id", chat_id)
     if not user:
         await ctx.user_repo.add(User(chat_id=chat_id))
 
@@ -292,31 +292,29 @@ async def register(request: UserRequest):
 @app.get(SupervisorRoutes.USER + "/{chat_id}/presets")
 async def get_presets(chat_id: int):
     response = {}
-    response["presets"] = await ctx.preset_view.get(
-        UserPresets, "chat_id", chat_id
-    )
-    user: List[User] = await ctx.user_repo.get(User, "chat_id", chat_id)
+    response["presets"] = await ctx.preset_view.get("chat_id", chat_id)
+    user: List[User] = await ctx.user_repo.get("chat_id", chat_id)
     response["cur_preset"] = user[0].cur_preset
     return response
 
 
 @app.get(SupervisorRoutes.SUMMARIZE)
 async def get_cached_summary(density: Density, summary_id: UUID):
-    response = await ctx.summary_repo.get(Summary, "summary_id", summary_id)
+    response = await ctx.summary_repo.get("summary_id", summary_id)
 
     return list(filter(lambda x: x.density == density, response))[0]
 
 
 @app.patch(SupervisorRoutes.USER + "/{chat_id}/presets", status_code=204)
 async def change_preset(chat_id: int, request: ChangePresetRequest):
-    user: User = (await ctx.user_repo.get(User, "chat_id", chat_id))[0]
+    user: User = (await ctx.user_repo.get("chat_id", chat_id))[0]
     user.cur_preset = request.cur_preset
     await ctx.user_repo.update(user, fields=["cur_preset"])
 
 
 @app.patch(SupervisorRoutes.PRESET, status_code=204)
 async def update_preset(request: PartialPresetUpdate):
-    presets = await ctx.preset_repo.get(Preset, "preset_id", request.preset_id)
+    presets = await ctx.preset_repo.get("preset_id", request.preset_id)
     preset = presets[0]
 
     request_dump = request.model_dump()
@@ -360,7 +358,7 @@ async def add_preset(chat_id: int, preset: PresetData):
 async def fetch(request: FetchRequest, response: Response):
     corr_id = correlation_id.get()
     logger.debug("Started fetching updates")
-    configs: List[Config] = await ctx.config_repo.get(Config)
+    configs: List[Config] = await ctx.config_repo.get()
     config: Config = random.choice(configs)
     data = await call_scraper(
         corr_id, request, EmbeddingSource(config.embedding_source)
@@ -392,12 +390,12 @@ async def summarize(request: SummarizeRequest):
     request.required_density = request.required_density[::-1]
 
     config: Config = (
-        await ctx.config_repo.get(Config, "config_id", request.config_id)
+        await ctx.config_repo.get("config_id", request.config_id)
     )[0]
-    user: User = (await ctx.user_repo.get(User, "chat_id", request.chat_id))[0]
-    preset: Preset = (
-        await ctx.preset_repo.get(Preset, "preset_id", user.cur_preset)
-    )[0]
+    user: User = (await ctx.user_repo.get("chat_id", request.chat_id))[0]
+    preset: Preset = (await ctx.preset_repo.get("preset_id", user.cur_preset))[
+        0
+    ]
     summary: Dict[Density, Dict[str, str]] = {}
     for density in request.required_density:
         logger.debug(f"Started generating {density.value} summary")
@@ -437,7 +435,7 @@ async def set_callback(request: CallbackPostRequest):
 @app.get(SupervisorRoutes.CALLBACK + "/{callback_id}")
 async def get_callback(callback_id):
     callback_data = await ctx.callback_repository.get(
-        Callback, "callback_id", callback_id
+        "callback_id", callback_id
     )
     return json.loads(callback_data[0].callback_data)
 
