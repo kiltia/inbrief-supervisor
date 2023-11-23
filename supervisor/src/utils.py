@@ -8,7 +8,7 @@ REQUEST_TIMEOUT = 1e9
 
 def form_scraper_request(request, embedding_source, channels):
     body = request.model_dump()
-    body["channels"] = list(channels.json())
+    body["channels"] = channels
 
     match embedding_source:
         case EmbeddingSource.FTMLM:

@@ -30,6 +30,7 @@ from shared.entities import (
     User,
     UserPreset,
     UserPresets,
+    Folder,
 )
 from shared.logging import configure_logging
 from shared.models import (
@@ -44,6 +45,7 @@ from shared.models import (
     PresetData,
     SummarizeRequest,
     UserRequest,
+    ConfigPostRequest,
 )
 from shared.resources import SharedResources
 from shared.routes import (
@@ -90,6 +92,7 @@ class Context:
         self.up_repo = PgRepository(self.pg, UserPreset)
         self.config_repo = PgRepository(self.pg, Config)
         self.summary_repo = PgRepository(self.pg, Summary)
+        self.folder_repo = PgRepository(self.pg, Folder)
 
     async def init_db(self) -> None:
         await self.pg.connect()
@@ -155,20 +158,12 @@ async def call_scraper(
         await ctx.preset_repo.get("preset_id", str(user.cur_preset))
     )[0]
 
+    channels: List[int] = (
+        await ctx.folder_repo.get("chat_folder_link", preset.chat_folder_link)
+    )[0].channels
+
+    body = form_scraper_request(request, embedding_source, channels)
     async with httpx.AsyncClient() as client:
-        channels = await client.post(
-            create_url(
-                network_settings.scraper_port,
-                ScraperRoutes.SYNC,
-                network_settings.scraper_host,
-            ),
-            json={"chat_folder_link": preset.chat_folder_link},
-            timeout=REQUEST_TIMEOUT,
-            headers={"X-Request-ID": corr_id},
-        )
-
-        body = form_scraper_request(request, embedding_source, channels)
-
         return await client.post(
             url,
             json=body,
@@ -256,11 +251,12 @@ async def call_summarizer(
 
 @verifiable_request
 async def call_editor(
-    corr_id: UUID, summary_id: str, style: str, density: Density
+    corr_id: UUID, summary_id: str, style: str, model: str, density: Density
 ):
     logger.debug("Creating a new editor request")
     body = {
         "style": style,
+        "model": model,
         "summary_id": str(summary_id),
         "density": density.value,
     }
@@ -357,9 +353,11 @@ async def add_preset(chat_id: int, preset: PresetData):
 @app.post(SupervisorRoutes.FETCH)
 async def fetch(request: FetchRequest, response: Response):
     corr_id = correlation_id.get()
-    logger.debug("Started fetching updates")
+    logger.info("Started fetching updates")
     configs: List[Config] = await ctx.config_repo.get()
+    configs = list(filter(lambda config: not config.inactive, configs))
     config: Config = random.choice(configs)
+    logger.info(f"Using config {config.config_id}")
     data = await call_scraper(
         corr_id, request, EmbeddingSource(config.embedding_source)
     )
@@ -411,7 +409,11 @@ async def summarize(request: SummarizeRequest):
         logger.debug(f"Finished generating {density.value} summary")
         logger.debug(f"Started editing {density.value} summary")
         summary[density]["summary"] = await call_editor(
-            corr_id, summary_id, preset.editor_prompt, density
+            corr_id,
+            summary_id,
+            preset.editor_prompt,
+            config.editor_model,
+            density,
         )
         logger.debug(f"Finished editing {density.value} summary")
     summary["summary_id"] = summary_id
@@ -458,3 +460,25 @@ async def main() -> None:
 @app.on_event("shutdown")
 async def disconnect() -> None:
     await ctx.dispose_db()
+
+
+@app.post(SupervisorRoutes.CONFIG, status_code=204)
+async def add_config(request: ConfigPostRequest):
+    await ctx.config_repo.add(
+        Config(
+            config_id=request.config_id,
+            embedding_source=request.embedding_source,
+            linking_method=request.linking_method,
+            summary_method=request.summary_method,
+            editor_model=request.editor_model,
+            inactive=False,
+        ),
+    )
+
+
+@app.patch(SupervisorRoutes.CONFIG, status_code=204)
+async def drop_config(config_id: int):
+    config = (await ctx.config_repo.get("config_id", config_id))[0]
+    config.inactive = True
+
+    return await ctx.config_repo.update(config, ["inactive"])

@@ -10,6 +10,25 @@
             "threshold" : 0.15,
             "semantic_threshold" : [0.835, 1.0],
             "min_samples" : 2
+        },
+        "kmeans" : {
+            "min_samples":2,
+            "algorithm":"lloyd"
+        },
+        "optics" : {
+            "min_samples":2,
+            "metric" :"minkowski",
+            "p":2,
+            "xi":0.005
+        },
+        "affinity_propagation" : {
+            "min_samples":2,
+            "max_iter": 100
+        },
+        "agglomerative_clustering" : {
+            "min_samples":2, 
+            "linkage":"ward",
+            "metric" :"euclidean"
         }
     }, 
     "ft+mlm" : {
@@ -23,6 +42,25 @@
             "threshold" : 0.15,
             "semantic_threshold" : [0.82, 1.0],
             "min_samples" : 2
+        },
+        "kmeans" : {
+            "min_samples":2,
+            "algorithm":"elkan"
+        },
+        "optics" : {
+            "min_samples":2,
+            "metric" :"minkowski",
+            "p":1,
+            "xi":0.12
+        },
+        "affinity_propagation" : {
+            "min_samples":2,
+            "max_iter": 6
+        },
+        "agglomerative_clustering" : {
+            "min_samples":2,
+            "linkage":"single",
+            "metric":"l2"
         }
     },
     "mlm" : {
@@ -36,6 +74,25 @@
             "threshold" : 0.15,
             "semantic_threshold" : [0.82, 1.0],
             "min_samples" : 2
+        },
+        "kmeans" : {
+            "min_samples":2,
+            "algorithm":"elkan"
+        },
+        "optics" : {
+            "min_samples":2,
+            "metric" :"minkowski",
+            "p":1,
+            "xi":0.17
+        },
+        "affinity_propagation" : {
+            "min_samples":2,
+            "max_iter": 1000
+        },
+        "agglomerative_clustering" : {
+            "min_samples":2,
+            "linkage":"single",
+            "metric":"l2"
         }
     }
 }
