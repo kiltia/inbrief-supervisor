@@ -150,7 +150,7 @@ async def call_scraper(
         ScraperRoutes.PARSE,
         network_settings.scraper_host,
     )
-    logger.debug("Creating a new scraper request")
+    logger.info("Creating a new scraper request")
 
     user: User = (await ctx.user_repo.get("chat_id", request.chat_id))[0]
 
@@ -181,7 +181,7 @@ async def call_linker(
     embedding_source: EmbeddingSource,
     method: LinkingMethod,
 ):
-    logger.debug("Creating a new linker request")
+    logger.info("Creating a new linker request")
 
     # NOTE(nrydanov): List of dict -> dict of list conversion.
     # Those actions are obvious overhead, but it won't be visible for now
@@ -222,7 +222,7 @@ async def call_summarizer(
     config_id: UUID,
     density: Density,
 ):
-    logger.debug("Creating a new summarizer request")
+    logger.info("Creating a new summarizer request")
     body = {
         "story_id": str(story_id),
         "config_id": config_id,
@@ -253,7 +253,7 @@ async def call_summarizer(
 async def call_editor(
     corr_id: UUID, summary_id: str, style: str, model: str, density: Density
 ):
-    logger.debug("Creating a new editor request")
+    logger.info("Creating a new editor request")
     body = {
         "style": style,
         "model": model,
@@ -377,6 +377,7 @@ async def fetch(request: FetchRequest, response: Response):
         else data["text"]
     )
 
+    logger.info("Finished fetching updates, sending response")
     return {"config_id": config.config_id, "story_ids": linked_data}
 
 
@@ -384,7 +385,7 @@ async def fetch(request: FetchRequest, response: Response):
 async def summarize(request: SummarizeRequest):
     corr_id = correlation_id.get()
     summary_id = uuid4()
-    logger.debug("Started serving request")
+    logger.info("Started serving summary request")
     request.required_density = request.required_density[::-1]
 
     config: Config = (
@@ -418,8 +419,7 @@ async def summarize(request: SummarizeRequest):
         logger.debug(f"Finished editing {density.value} summary")
     summary["summary_id"] = summary_id
 
-    logger.debug("Sending response with summarized news")
-
+    logger.info("Sending response with summarized news")
     return summary
 
 
