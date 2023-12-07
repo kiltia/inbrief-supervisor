@@ -25,18 +25,19 @@ from shared.db import PgRepository, create_db_string
 from shared.entities import (
     Callback,
     Config,
+    Folder,
     Preset,
     Summary,
     User,
     UserPreset,
     UserPresets,
-    Folder,
 )
 from shared.logging import configure_logging
 from shared.models import (
     CallbackPatchRequest,
     CallbackPostRequest,
     ChangePresetRequest,
+    ConfigPostRequest,
     Density,
     EmbeddingSource,
     FetchRequest,
@@ -45,7 +46,6 @@ from shared.models import (
     PresetData,
     SummarizeRequest,
     UserRequest,
-    ConfigPostRequest,
 )
 from shared.resources import SharedResources
 from shared.routes import (
