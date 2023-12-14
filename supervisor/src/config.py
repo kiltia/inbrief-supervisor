@@ -16,6 +16,9 @@ class NetworkSettings(BaseSettings):
     scraper_host: str
     editor_host: str
 
+    def __init__(self, _env_file: str):
+        super().__init__(_env_file=_env_file)
+
 
 class BM25Settings(BaseModel):
     depth: int
@@ -66,3 +69,6 @@ class LinkingSettings(JSONSettings):
     openai: LinkerSettings
     ftmlm: LinkerSettings = Field(alias="ft+mlm")
     mlm: LinkerSettings
+
+    def __init__(self, path: str):
+        super().__init__(path)

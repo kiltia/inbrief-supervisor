@@ -2,7 +2,7 @@ import json
 import logging
 import random
 from datetime import datetime
-from typing import Dict, List
+from typing import Any, Dict, List
 from uuid import UUID, uuid4
 
 import httpx
@@ -11,7 +11,6 @@ from databases import Database
 from fastapi import FastAPI, Response, status
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import HTTPException
-from fastapi.responses import JSONResponse
 from pydantic import TypeAdapter
 from utils import (
     REQUEST_TIMEOUT,
@@ -32,7 +31,7 @@ from shared.entities import (
     UserPreset,
     UserPresets,
 )
-from shared.logging import configure_logging
+from shared.logger import configure_logging
 from shared.models import (
     CallbackPatchRequest,
     CallbackPostRequest,
@@ -62,7 +61,7 @@ app.add_middleware(CorrelationIdMiddleware, validator=None)
 
 
 @app.exception_handler(Exception)
-async def unhandled_exception_handler(request, exc: Exception) -> JSONResponse:
+async def unhandled_exception_handler(request, exc: Exception):
     return await http_exception_handler(
         request,
         HTTPException(
@@ -287,7 +286,7 @@ async def register(request: UserRequest):
 
 @app.get(SupervisorRoutes.USER + "/{chat_id}/presets")
 async def get_presets(chat_id: int):
-    response = {}
+    response: Dict[str, Any] = {}
     response["presets"] = await ctx.preset_view.get("chat_id", chat_id)
     user: List[User] = await ctx.user_repo.get("chat_id", chat_id)
     response["cur_preset"] = user[0].cur_preset
@@ -323,7 +322,7 @@ async def update_preset(request: PartialPresetUpdate):
     keys = request_dump.keys()
 
     return await ctx.preset_repo.update(
-        TypeAdapter(Preset).validate_python(preset_dump), keys
+        TypeAdapter(Preset).validate_python(preset_dump), list(keys)
     )
 
 
@@ -395,7 +394,7 @@ async def summarize(request: SummarizeRequest):
     preset: Preset = (await ctx.preset_repo.get("preset_id", user.cur_preset))[
         0
     ]
-    summary: Dict[Density, Dict[str, str]] = {}
+    summary: Dict[str, Any] = {}
     for density in request.required_density:
         logger.debug(f"Started generating {density.value} summary")
         summary_story = await call_summarizer(
