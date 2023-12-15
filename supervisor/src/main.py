@@ -122,7 +122,7 @@ def verifiable_request(call):
                 logger.error(
                     f"Got {response.status_code} after calling to {call.__name__}"
                 )
-                return HTTPException(
+                raise HTTPException(
                     status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail=f"{call.__name__} is unavailable at the moment.",
                     headers={"X-Request-ID": correlation_id.get() or ""},
