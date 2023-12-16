@@ -57,7 +57,6 @@ class AgglomerativeClusteringSettings(BaseModel):
 
 
 class LinkerSettings(BaseModel):
-    bm25: BM25Settings
     dbscan: DBScanSettings
     kmeans: KMeansSettings
     optics: OpticsSettings
