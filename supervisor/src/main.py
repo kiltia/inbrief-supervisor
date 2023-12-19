@@ -287,6 +287,8 @@ async def get_presets(chat_id: int):
 async def get_cached_summary(density: Density, summary_id: UUID):
     response = await ctx.summary_repo.get("summary_id", summary_id)
 
+    await ctx.summary_repo.get("summary_id", summary_id)
+
     return list(filter(lambda x: x.density == density, response))[0]
 
 
