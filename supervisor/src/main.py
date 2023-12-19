@@ -122,7 +122,7 @@ def verifiable_request(call):
                 logger.error(
                     f"Got {response.status_code} after calling to {call.__name__}"
                 )
-                return HTTPException(
+                raise HTTPException(
                     status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail=f"{call.__name__} is unavailable at the moment.",
                     headers={"X-Request-ID": correlation_id.get() or ""},
@@ -181,16 +181,6 @@ async def call_linker(
     method: LinkingMethod,
 ):
     logger.info("Creating a new linker request")
-
-    # NOTE(nrydanov): List of dict -> dict of list conversion.
-    # Those actions are obvious overhead, but it won't be visible for now
-    data = {k: [entity[k] for entity in data] for k in data[0]}
-    data["embeddings"] = list(map(lambda x: json.loads(x), data["embeddings"]))
-
-    data["embeddings"] = {
-        k: [entity[k] for entity in data["embeddings"]]
-        for k in data["embeddings"][0]
-    }
 
     request = form_linking_request(
         data, embedding_source, linking_settings, method
@@ -355,8 +345,21 @@ async def fetch(request: FetchRequest, response: Response):
     logger.info("Started fetching updates")
     configs: List[Config] = await ctx.config_repo.get()
     configs = list(filter(lambda config: not config.inactive, configs))
-    config: Config = random.choice(configs)
-    logger.info(f"Using config {config.config_id}")
+    if not request.config_id:
+        config = random.choice(configs)
+        logger.debug(f"Using random config ID: {config.config_id}")
+    else:
+        filtered_configs = list(
+            filter(lambda x: x.config_id == request.config_id, configs)
+        )
+        if not filtered_configs:
+            raise HTTPException(
+                httpx.codes.BAD_REQUEST, detail="Bad config ID"
+            )
+        else:
+            config = filtered_configs[0]
+        logger.debug("Using requested config ID: {config.config_id}")
+
     data = await call_scraper(
         corr_id, request, EmbeddingSource(config.embedding_source)
     )
