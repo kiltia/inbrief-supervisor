@@ -40,13 +40,14 @@ from shared.models import (
     ChangePresetRequest,
     ConfigPostRequest,
     Density,
-    EditorConfig,
     EmbeddingSource,
     FetchRequest,
     LinkingMethod,
+    OpenAIModels,
     PartialPresetUpdate,
     PresetData,
     SummarizeRequest,
+    SummaryMethod,
     UserRequest,
 )
 from shared.resources import SharedResources
@@ -208,21 +209,31 @@ async def call_linker(
 @verifiable_request
 async def call_summarizer(
     corr_id: UUID,
-    story_id: UUID,
+    story: list[str],
     config: Config,
     density: Density,
     preset: Preset,
 ):
-    sources: list[Source] = await ctx.sp_repo.get("story_id", story_id)
-    text = list(map(lambda x: x.text, sources))
     logger.info("Creating a new summarizer request")
+    summary_method = (
+        SummaryMethod.OPENAI.value
+        if OpenAIModels.has_value(config.summary_method)
+        else config.summary_method
+    )
+    summary_model = (
+        None if summary_method == SummaryMethod.BART else config.summary_method
+    )
     body = {
-        "text": text,
-        "config": config,
+        "story": story,
         "density": density.value,
-        "editor_config": EditorConfig(
-            style=preset.editor_prompt, model=config.summary_method
-        ),
+        "summary_method": summary_method,
+        "config": {
+            "summary_model": summary_model,
+            "editor_config": {
+                "style": preset.editor_prompt,
+                "model": config.editor_model,
+            },
+        },
     }
 
     async with httpx.AsyncClient() as client:
@@ -372,17 +383,46 @@ async def summarize(request: SummarizeRequest):
     user = (await ctx.user_repo.get("chat_id", request.chat_id))[0]
     preset = (await ctx.preset_repo.get("preset_id", user.cur_preset))[0]
     summary: Dict[str, Any] = {}
+    sources: list[Source] = await ctx.sp_repo.get("story_id", request.story_id)
+    story = list(map(lambda x: x.text, sources))
+
+    response: dict[Any, Any] = {}
+    response["summary"] = {}
+    request.required_density.append(Density.TITLE)
     for density in request.required_density:
         logger.debug(f"Started generating {density.value} summary")
         summary = await call_summarizer(
-            corr_id, request.story_id, config, density, preset
+            corr_id, story, config, density, preset
         )
         logger.debug(f"Finished generating {density.value} summary")
-        summary[density] = summary
-    summary["summary_id"] = summary_id
+        response["summary"][density] = summary
+    response["summary_id"] = summary_id
+
+    entities = []
+
+    for density in request.required_density:
+        if density == density.TITLE:
+            pass
+        summary_id = uuid4()
+        summary_entity = Summary(
+            summary_id=summary_id,
+            chat_id=request.chat_id,
+            story_id=UUID(request.story_id),
+            summary=response["summary"][density]["edited"],
+            title=response["summary"][Density.TITLE]["edited"],
+            density=density,
+            config_id=request.config_id,
+            feedback=None,
+            date_created=datetime.now().strftime(DB_DATE_FORMAT),
+        )
+        entities.append(summary_entity)
+
+    await ctx.summary_repo.add(entities)
+
+    response["references"] = list(map(lambda x: x.reference, sources))
 
     logger.info("Sending response with summarized news")
-    return summary
+    return response
 
 
 @app.post(SupervisorRoutes.CALLBACK)
