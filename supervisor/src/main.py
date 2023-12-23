@@ -26,6 +26,8 @@ from shared.entities import (
     Config,
     Folder,
     Preset,
+    Source,
+    StoryPosts,
     Summary,
     User,
     UserPreset,
@@ -38,6 +40,7 @@ from shared.models import (
     ChangePresetRequest,
     ConfigPostRequest,
     Density,
+    EditorConfig,
     EmbeddingSource,
     FetchRequest,
     LinkingMethod,
@@ -48,7 +51,6 @@ from shared.models import (
 )
 from shared.resources import SharedResources
 from shared.routes import (
-    EditorRoutes,
     LinkerRoutes,
     ScraperRoutes,
     SummarizerRoutes,
@@ -92,6 +94,7 @@ class Context:
         self.config_repo = PgRepository(self.pg, Config)
         self.summary_repo = PgRepository(self.pg, Summary)
         self.folder_repo = PgRepository(self.pg, Folder)
+        self.sp_repo = PgRepository(self.pg, StoryPosts)
 
     async def init_db(self) -> None:
         await self.pg.connect()
@@ -206,18 +209,20 @@ async def call_linker(
 async def call_summarizer(
     corr_id: UUID,
     story_id: UUID,
-    summary_id: UUID,
-    chat_id: int,
-    config_id: UUID,
+    config: Config,
     density: Density,
+    preset: Preset,
 ):
+    sources: list[Source] = await ctx.sp_repo.get("story_id", story_id)
+    text = list(map(lambda x: x.text, sources))
     logger.info("Creating a new summarizer request")
     body = {
-        "story_id": str(story_id),
-        "config_id": config_id,
+        "text": text,
+        "config": config,
         "density": density.value,
-        "summary_id": str(summary_id),
-        "chat_id": chat_id,
+        "editor_config": EditorConfig(
+            style=preset.editor_prompt, model=config.summary_method
+        ),
     }
 
     async with httpx.AsyncClient() as client:
@@ -226,36 +231,6 @@ async def call_summarizer(
                 network_settings.summarizer_port,
                 SummarizerRoutes.SUMMARIZE,
                 network_settings.summarizer_host,
-            ),
-            json=body,
-            # NOTE(nrydanov): Maybe it's a bad idea, but I don't really
-            # understand what would be a nice value there
-            timeout=REQUEST_TIMEOUT,
-            headers={
-                "X-Request-ID": chain_correlations(corr_id, uuid4().hex[:4])
-            },
-        )
-        return response
-
-
-@verifiable_request
-async def call_editor(
-    corr_id: UUID, summary_id: str, style: str, model: str, density: Density
-):
-    logger.info("Creating a new editor request")
-    body = {
-        "style": style,
-        "model": model,
-        "summary_id": str(summary_id),
-        "density": density.value,
-    }
-
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            create_url(
-                network_settings.editor_port,
-                EditorRoutes.EDIT,
-                network_settings.editor_host,
             ),
             json=body,
             timeout=REQUEST_TIMEOUT,
@@ -388,39 +363,22 @@ async def fetch(request: FetchRequest, response: Response):
 @app.post(SupervisorRoutes.SUMMARIZE)
 async def summarize(request: SummarizeRequest):
     corr_id = correlation_id.get()
-    summary_id = uuid4()
     logger.info("Started serving summary request")
     request.required_density = request.required_density[::-1]
-
+    summary_id = uuid4()
     config: Config = (
         await ctx.config_repo.get("config_id", request.config_id)
     )[0]
-    user: User = (await ctx.user_repo.get("chat_id", request.chat_id))[0]
-    preset: Preset = (await ctx.preset_repo.get("preset_id", user.cur_preset))[
-        0
-    ]
+    user = (await ctx.user_repo.get("chat_id", request.chat_id))[0]
+    preset = (await ctx.preset_repo.get("preset_id", user.cur_preset))[0]
     summary: Dict[str, Any] = {}
     for density in request.required_density:
         logger.debug(f"Started generating {density.value} summary")
-        summary_story = await call_summarizer(
-            corr_id,
-            request.story_id,
-            summary_id,
-            request.chat_id,
-            config.config_id,
-            density,
+        summary = await call_summarizer(
+            corr_id, request.story_id, config, density, preset
         )
-        summary[density] = summary_story
         logger.debug(f"Finished generating {density.value} summary")
-        logger.debug(f"Started editing {density.value} summary")
-        summary[density]["summary"] = await call_editor(
-            corr_id,
-            summary_id,
-            preset.editor_prompt,
-            config.editor_model,
-            density,
-        )
-        logger.debug(f"Finished editing {density.value} summary")
+        summary[density] = summary
     summary["summary_id"] = summary_id
 
     logger.info("Sending response with summarized news")
