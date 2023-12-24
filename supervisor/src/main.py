@@ -415,9 +415,18 @@ async def summarize(request: SummarizeRequest):
     request.required_density.append(Density.TITLE)
     for density in request.required_density:
         logger.debug(f"Started generating {density.value} summary")
-        summary = await call_summarizer(
-            corr_id, story, config, density, preset
-        )
+        if density == Density.TITLE:
+            summary = await call_summarizer(
+                corr_id,
+                [response["summary"][Density.LARGE]["original"]],
+                config,
+                density,
+                preset,
+            )
+        else:
+            summary = await call_summarizer(
+                corr_id, story, config, density, preset
+            )
         logger.debug(f"Finished generating {density.value} summary")
         response["summary"][density] = summary
 
