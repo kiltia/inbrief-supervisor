@@ -270,12 +270,29 @@ async def get_presets(chat_id: int):
 
 
 @app.get(SupervisorRoutes.SUMMARIZE)
-async def get_cached_summary(density: Density, summary_id: UUID):
-    response = await ctx.summary_repo.get("summary_id", summary_id)
+async def get_cached_summary(summary_id: UUID):
+    summaries = await ctx.summary_repo.get("summary_id", summary_id)
 
-    await ctx.summary_repo.get("summary_id", summary_id)
+    if not summaries:
+        raise HTTPException(status_code=httpx.codes.BAD_REQUEST)
 
-    return list(filter(lambda x: x.density == density, response))[0]
+    sources = await ctx.sp_repo.get("story_id", summaries[0].story_id)
+    references = list(map(lambda x: x.reference, sources))
+
+    small_summary = list(
+        filter(lambda x: x.density == Density.SMALL, summaries)
+    )[0]
+
+    large_summary = list(
+        filter(lambda x: x.density == Density.LARGE, summaries)
+    )[0]
+
+    return {
+        "references": references,
+        "small": small_summary.summary,
+        "large": large_summary.summary,
+        "title": large_summary.title,
+    }
 
 
 @app.patch(SupervisorRoutes.USER + "/{chat_id}/presets", status_code=204)
@@ -382,7 +399,6 @@ async def summarize(request: SummarizeRequest):
     )[0]
     user = (await ctx.user_repo.get("chat_id", request.chat_id))[0]
     preset = (await ctx.preset_repo.get("preset_id", user.cur_preset))[0]
-    summary: Dict[str, Any] = {}
     sources: list[Source] = await ctx.sp_repo.get("story_id", request.story_id)
     story = list(map(lambda x: x.text, sources))
 
@@ -396,6 +412,7 @@ async def summarize(request: SummarizeRequest):
         )
         logger.debug(f"Finished generating {density.value} summary")
         response["summary"][density] = summary
+
     response["summary_id"] = summary_id
 
     entities = []
@@ -403,7 +420,6 @@ async def summarize(request: SummarizeRequest):
     for density in request.required_density:
         if density == density.TITLE:
             pass
-        summary_id = uuid4()
         summary_entity = Summary(
             summary_id=summary_id,
             chat_id=request.chat_id,
