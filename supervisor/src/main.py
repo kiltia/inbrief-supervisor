@@ -161,12 +161,20 @@ async def call_scraper(
         await ctx.preset_repo.get("preset_id", str(user.cur_preset))
     )[0]
 
-    channels: List[int] = (
-        await ctx.folder_repo.get("chat_folder_link", preset.chat_folder_link)
-    )[0].channels
-
-    body = form_scraper_request(request, embedding_source, channels)
     async with httpx.AsyncClient() as client:
+        channels = await client.get(
+            create_url(
+                network_settings.scraper_port,
+                ScraperRoutes.SYNC + f"?link={preset.chat_folder_link}",
+                network_settings.scraper_host,
+            )
+        )
+
+        # TODO(nrydanov): Move channel sync in seperate @verifiable_request
+        if channels.status_code != httpx.codes.OK:
+            raise HTTPException(status_code=httpx.codes.BAD_REQUEST)
+
+        body = form_scraper_request(request, embedding_source, channels)
         return await client.post(
             url,
             json=body,
