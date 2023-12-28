@@ -333,15 +333,14 @@ async def update_preset(request: PartialPresetUpdate):
 async def add_preset(chat_id: int, preset: PresetData):
     preset_id = uuid4()
     async with httpx.AsyncClient() as client:
-        await client.post(
+        await client.get(
             create_url(
                 network_settings.scraper_port,
-                ScraperRoutes.SYNC,
+                ScraperRoutes.SYNC + f"?link={preset.chat_folder_link}",
                 network_settings.scraper_host,
-            ),
-            json={"chat_folder_link": preset.chat_folder_link},
-            timeout=REQUEST_TIMEOUT,
+            )
         )
+
     await ctx.preset_repo.add(
         Preset(
             preset_id=preset_id,
