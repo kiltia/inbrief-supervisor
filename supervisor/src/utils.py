@@ -29,22 +29,25 @@ def form_linking_request(
 ):
     match source:
         case EmbeddingSource.FTMLM:
-            config = linking_settings.ftmlm
+            settings = linking_settings.ftmlm
         case EmbeddingSource.OPENAI:
-            config = linking_settings.openai
+            settings = linking_settings.openai
         case EmbeddingSource.MLM:
-            config = linking_settings.mlm
+            settings = linking_settings.mlm
         case _:
             possible_values = [e.value for e in EmbeddingSource]
             raise HTTPException(
                 status.HTTP_500_INTERNAL_SERVER_ERROR,
                 f"Got unexpected embedding source, available ones: {possible_values}",
             )
+    method_setting = (settings.model_dump())[method.value]
     return {
         "entities": data,
-        "config": (config.model_dump())[method.value],
-        "embedding_source": source,
         "method": method.value,
+        "embedding_source": source,
+        "scorer": method_setting["scorer"],
+        "metric": method_setting["metric"],
+        "config": method_setting["config"],
     }
 
 
