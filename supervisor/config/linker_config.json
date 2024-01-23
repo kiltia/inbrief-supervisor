@@ -16,12 +16,12 @@
         "optics" : {
             "config": {
                 "params_range": {
-                    "eps": [0.1, 5],
+                    "eps": [0.1, 17],
                     "min_samples": [2, 15]
                 },
                 "immutable_config": {
                     "metric": "cityblock",
-                    "algorithm": "dbscan"
+                    "cluster_method": "dbscan"
                 },
                 "n_components": 50
             },
@@ -61,7 +61,7 @@
                 },
                 "immutable_config": {
                     "metric": "cityblock",
-                    "algorithm": "dbscan"
+                    "cluster_method": "dbscan"
                 },
                 "n_components": 50
             },
@@ -101,7 +101,7 @@
                 },
                 "immutable_config": {
                     "metric": "cityblock",
-                    "algorithm": "dbscan"
+                    "cluster_method": "dbscan"
                 },
                 "n_components": 50
             },
