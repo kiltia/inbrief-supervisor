@@ -8,7 +8,7 @@
                 "immutable_config": {
                     "algorithm":"lloyd"
                 },
-                "n_components": 50
+                "n_components": 30
             },
             "scorer": "silhouette",
             "metric": "cityblock"
@@ -23,7 +23,7 @@
                     "metric": "cityblock",
                     "cluster_method": "dbscan"
                 },
-                "n_components": 50
+                "n_components": 30
             },
             "scorer": "silhouette",
             "metric": "cityblock"
@@ -33,7 +33,22 @@
                 "params_range": {
                     "min_cluster_size": [3, 15]
                 },
-                "n_components": 50
+                "n_components": 30
+            },
+            "scorer": "silhouette",
+            "metric": "cityblock"
+        },
+        "agglomerative" : {
+            "config": {
+                "params_range": {
+                    "distance_threshold": [1.6, 6]
+                },
+                "immutable_config": {
+                    "n_clusters": null,
+                    "metric": "cityblock",
+                    "linkage": "complete"
+                },
+                "n_components": 30
             },
             "scorer": "silhouette",
             "metric": "cityblock"
@@ -77,6 +92,21 @@
             },
             "scorer": "silhouette",
             "metric": "cityblock"
+        },
+        "agglomerative" : {
+            "config": {
+                "params_range": {
+                    "distance_threshold": [1.6, 6]
+                },
+                "immutable_config": {
+                    "n_clusters": null,
+                    "metric": "cityblock",
+                    "linkage": "complete"
+                },
+                "n_components": 30
+            },
+            "scorer": "silhouette",
+            "metric": "cityblock"
         }
     },
     "ft+mlm" : {
@@ -114,6 +144,21 @@
                     "min_cluster_size": [3, 15]
                 },
                 "n_components": 50
+            },
+            "scorer": "silhouette",
+            "metric": "cityblock"
+        },
+        "agglomerative" : {
+            "config": {
+                "params_range": {
+                    "distance_threshold": [1.6, 6]
+                },
+                "immutable_config": {
+                    "n_clusters": null,
+                    "metric": "cityblock",
+                    "linkage": "complete"
+                },
+                "n_components": 30
             },
             "scorer": "silhouette",
             "metric": "cityblock"

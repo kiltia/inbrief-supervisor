@@ -35,6 +35,7 @@ class ClusteringSettings(BaseModel):
 class LinkerSettings(BaseModel):
     kmeans: ClusteringSettings
     optics: ClusteringSettings
+    agglomerative: ClusteringSettings
     hdbscan: ClusteringSettings
 
 
