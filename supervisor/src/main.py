@@ -4,6 +4,7 @@ import random
 from datetime import datetime
 from typing import Any, Dict, List
 from uuid import UUID, uuid4
+from contextlib import asynccontextmanager
 
 import httpx
 from asgi_correlation_id import CorrelationIdMiddleware, correlation_id
@@ -58,6 +59,15 @@ from shared.routes import (
     SupervisorRoutes,
 )
 from shared.utils import DB_DATE_FORMAT, SHARED_CONFIG_PATH
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    configure_logging()
+    await ctx.init_db()
+    yield
+    await ctx.dispose_db()
+
 
 app = FastAPI()
 app.add_middleware(CorrelationIdMiddleware, validator=None)
@@ -483,17 +493,6 @@ async def update_callback(request: CallbackPatchRequest):
         callback_data=json.dumps(request.callback_data),
     )
     await ctx.callback_repository.update(callback_row, ["callback_data"])
-
-
-@app.on_event("startup")
-async def main() -> None:
-    configure_logging()
-    await ctx.init_db()
-
-
-@app.on_event("shutdown")
-async def disconnect() -> None:
-    await ctx.dispose_db()
 
 
 @app.post(SupervisorRoutes.CONFIG, status_code=204)
