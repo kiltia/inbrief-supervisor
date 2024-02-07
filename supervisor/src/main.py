@@ -69,7 +69,7 @@ async def lifespan(app: FastAPI):
     await ctx.dispose_db()
 
 
-app = FastAPI()
+app = FastAPI(lifespan=lifespan)
 app.add_middleware(CorrelationIdMiddleware, validator=None)
 
 
