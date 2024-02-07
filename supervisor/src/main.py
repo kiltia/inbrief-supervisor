@@ -219,7 +219,6 @@ async def summarize(request: SummarizeRequest):
     sources: list[StorySources] = await ctx.ss_view.get(
         "story_id", request.story_id
     )
-    logger.debug(sources)
     story = list(map(lambda x: x.text, sources))
 
     response: dict[Any, Any] = {}
