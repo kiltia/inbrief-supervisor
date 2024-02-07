@@ -1,64 +1,47 @@
-import json
 import logging
 import random
-from datetime import datetime
-from typing import Any, Dict, List
-from uuid import UUID, uuid4
 from contextlib import asynccontextmanager
+from datetime import datetime
+from typing import Any, List
+from uuid import UUID, uuid4
 
+import api.routes.callback as callback_routes
+import api.routes.config as config_routes
+import api.routes.dashboard as dashboard_routes
+import api.routes.preset as preset_routes
+import api.routes.summary as summary_routes
+import api.routes.user as user_routes
 import httpx
+from api.requests import call_linker, call_scraper, call_summarizer
 from asgi_correlation_id import CorrelationIdMiddleware, correlation_id
-from databases import Database
+from context import ctx, linking_settings
 from fastapi import FastAPI, Response, status
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import HTTPException
 from pydantic import TypeAdapter
-from utils import (
-    REQUEST_TIMEOUT,
-    chain_correlations,
-    form_linking_request,
-    form_scraper_request,
-)
 
-from config import LinkingSettings, NetworkSettings
-from shared.db import PgRepository, create_db_string
 from shared.entities import (
-    Callback,
     Config,
-    Folder,
-    Preset,
+    Request,
     Source,
-    StoryPosts,
+    Story,
+    StorySource,
+    StorySources,
     Summary,
-    User,
-    UserPreset,
-    UserPresets,
 )
 from shared.logger import configure_logging
 from shared.models import (
-    CallbackPatchRequest,
-    CallbackPostRequest,
-    ChangePresetRequest,
-    ConfigPostRequest,
+    ClusteringMethod,
     Density,
     EmbeddingSource,
     FetchRequest,
-    LinkingMethod,
-    OpenAIModels,
-    PartialPresetUpdate,
-    PresetData,
+    LinkingConfig,
     SummarizeRequest,
-    SummaryMethod,
-    UserRequest,
 )
-from shared.resources import SharedResources
 from shared.routes import (
-    LinkerRoutes,
-    ScraperRoutes,
-    SummarizerRoutes,
     SupervisorRoutes,
 )
-from shared.utils import DB_DATE_FORMAT, SHARED_CONFIG_PATH
+from shared.utils import DB_DATE_FORMAT
 
 
 @asynccontextmanager
@@ -70,6 +53,14 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+app.include_router(callback_routes.router)
+app.include_router(config_routes.router)
+app.include_router(dashboard_routes.router)
+app.include_router(preset_routes.router)
+app.include_router(summary_routes.router)
+app.include_router(user_routes.router)
+
 app.add_middleware(CorrelationIdMiddleware, validator=None)
 
 
@@ -87,283 +78,16 @@ async def unhandled_exception_handler(request, exc: Exception):
 
 logger = logging.getLogger("app")
 
-network_settings = NetworkSettings(_env_file="config/network.cfg")
-linking_settings = LinkingSettings("config/linker_config.json")
-
-
-class Context:
-    def __init__(self) -> None:
-        self.shared_settings = SharedResources(
-            f"{SHARED_CONFIG_PATH}/settings.json"
-        )
-        self.pg = Database(create_db_string(self.shared_settings.pg_creds))
-        self.callback_repository = PgRepository(self.pg, Callback)
-        self.preset_view = PgRepository(self.pg, UserPresets)
-        self.user_repo = PgRepository(self.pg, User)
-        self.preset_repo = PgRepository(self.pg, Preset)
-        self.up_repo = PgRepository(self.pg, UserPreset)
-        self.config_repo = PgRepository(self.pg, Config)
-        self.summary_repo = PgRepository(self.pg, Summary)
-        self.folder_repo = PgRepository(self.pg, Folder)
-        self.sp_repo = PgRepository(self.pg, StoryPosts)
-
-    async def init_db(self) -> None:
-        await self.pg.connect()
-
-    async def dispose_db(self) -> None:
-        await self.pg.disconnect()
-
-
-ctx = Context()
-
-
-# TODO(nrydanov): Add detailed verification for all possible situations (#80)
-def verifiable_request(call):
-    async def wrapper(*args, **kwargs):
-        response = await call(*args, **kwargs)
-        match response.status_code:
-            case status.HTTP_200_OK:
-                return response.json()
-            case status.HTTP_204_NO_CONTENT:
-                logger.warning(
-                    f"Got no content response after calling to {call.__name__}"
-                )
-                raise HTTPException(
-                    status.HTTP_204_NO_CONTENT,
-                    detail=f"{call.__name__} returned no content response",
-                )
-            case _:
-                logger.error(
-                    f"Got {response.status_code} after calling to {call.__name__}"
-                )
-                raise HTTPException(
-                    status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"{call.__name__} is unavailable at the moment.",
-                    headers={"X-Request-ID": correlation_id.get() or ""},
-                )
-
-    return wrapper
-
 
 @app.get("/")
 async def hello():
     return {"message": "Supervisor API is running"}
 
 
-def create_url(port, method, host="localhost"):
-    return f"http://{host}:{port}{method}"
-
-
-@verifiable_request
-async def call_scraper(
-    corr_id: UUID, request: FetchRequest, embedding_source: EmbeddingSource
-):
-    url = create_url(
-        network_settings.scraper_port,
-        ScraperRoutes.PARSE,
-        network_settings.scraper_host,
-    )
-    logger.info("Creating a new scraper request")
-
-    user: User = (await ctx.user_repo.get("chat_id", request.chat_id))[0]
-
-    preset: Preset = (
-        await ctx.preset_repo.get("preset_id", str(user.cur_preset))
-    )[0]
-
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            create_url(
-                network_settings.scraper_port,
-                ScraperRoutes.SYNC + f"?link={preset.chat_folder_link}",
-                network_settings.scraper_host,
-            )
-        )
-
-        # TODO(nrydanov): Move channel sync in seperate @verifiable_request
-        if response.status_code != httpx.codes.OK:
-            raise HTTPException(status_code=httpx.codes.BAD_REQUEST)
-
-        body = form_scraper_request(request, embedding_source, response.json())
-        return await client.post(
-            url,
-            json=body,
-            timeout=REQUEST_TIMEOUT,
-            headers={
-                "X-Request-ID": chain_correlations(corr_id, uuid4().hex[:4])
-            },
-        )
-
-
-@verifiable_request
-async def call_linker(
-    corr_id: UUID,
-    data: dict,
-    embedding_source: EmbeddingSource,
-    method: LinkingMethod,
-):
-    logger.info("Creating a new linker request")
-
-    request = form_linking_request(
-        data, embedding_source, linking_settings, method
-    )
-
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            create_url(
-                network_settings.linker_port,
-                LinkerRoutes.GET_STORIES,
-                network_settings.linker_host,
-            ),
-            json=request,
-            timeout=REQUEST_TIMEOUT,
-            headers={
-                "X-Request-ID": chain_correlations(corr_id, uuid4().hex[:4])
-            },
-        )
-        return response
-
-
-@verifiable_request
-async def call_summarizer(
-    corr_id: UUID,
-    story: list[str],
-    config: Config,
-    density: Density,
-    preset: Preset,
-):
-    logger.info("Creating a new summarizer request")
-    summary_method = (
-        SummaryMethod.OPENAI.value
-        if OpenAIModels.has_value(config.summary_method)
-        else config.summary_method
-    )
-    summary_model = (
-        None if summary_method == SummaryMethod.BART else config.summary_method
-    )
-    body = {
-        "story": story,
-        "density": density.value,
-        "summary_method": summary_method,
-        "config": {
-            "summary_model": summary_model,
-            "editor_config": {
-                "style": preset.editor_prompt,
-                "model": config.editor_model,
-            },
-        },
-    }
-
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            create_url(
-                network_settings.summarizer_port,
-                SummarizerRoutes.SUMMARIZE,
-                network_settings.summarizer_host,
-            ),
-            json=body,
-            timeout=REQUEST_TIMEOUT,
-            headers={
-                "X-Request-ID": chain_correlations(corr_id, uuid4().hex[:4])
-            },
-        )
-        return response
-
-
-@app.post(SupervisorRoutes.USER, status_code=204)
-async def register(request: UserRequest):
-    chat_id = request.chat_id
-    user = await ctx.user_repo.get("chat_id", chat_id)
-    if not user:
-        await ctx.user_repo.add(User(chat_id=chat_id))
-
-
-@app.get(SupervisorRoutes.USER + "/{chat_id}/presets")
-async def get_presets(chat_id: int):
-    response: Dict[str, Any] = {}
-    response["presets"] = await ctx.preset_view.get("chat_id", chat_id)
-    user: List[User] = await ctx.user_repo.get("chat_id", chat_id)
-    response["cur_preset"] = user[0].cur_preset
-    return response
-
-
-@app.get(SupervisorRoutes.SUMMARIZE)
-async def get_cached_summary(summary_id: UUID):
-    summaries = await ctx.summary_repo.get("summary_id", summary_id)
-
-    if not summaries:
-        raise HTTPException(status_code=httpx.codes.BAD_REQUEST)
-
-    sources = await ctx.sp_repo.get("story_id", summaries[0].story_id)
-    references = list(map(lambda x: x.reference, sources))
-
-    small_summary = list(
-        filter(lambda x: x.density == Density.SMALL, summaries)
-    )[0]
-
-    large_summary = list(
-        filter(lambda x: x.density == Density.LARGE, summaries)
-    )[0]
-
-    return {
-        "references": references,
-        "small": small_summary.summary,
-        "large": large_summary.summary,
-        "title": large_summary.title,
-    }
-
-
-@app.patch(SupervisorRoutes.USER + "/{chat_id}/presets", status_code=204)
-async def change_preset(chat_id: int, request: ChangePresetRequest):
-    user: User = (await ctx.user_repo.get("chat_id", chat_id))[0]
-    user.cur_preset = request.cur_preset
-    await ctx.user_repo.update(user, fields=["cur_preset"])
-
-
-@app.patch(SupervisorRoutes.PRESET, status_code=204)
-async def update_preset(request: PartialPresetUpdate):
-    presets = await ctx.preset_repo.get("preset_id", request.preset_id)
-    preset = presets[0]
-
-    request_dump = request.model_dump()
-    preset_dump = preset.model_dump()
-    for key, value in request_dump.items():
-        if value is not None:
-            preset_dump[key] = value
-
-    request_dump.pop("chat_id")
-    keys = request_dump.keys()
-
-    return await ctx.preset_repo.update(
-        TypeAdapter(Preset).validate_python(preset_dump), list(keys)
-    )
-
-
-@app.post(SupervisorRoutes.PRESET, status_code=204)
-async def add_preset(chat_id: int, preset: PresetData):
-    preset_id = uuid4()
-    async with httpx.AsyncClient() as client:
-        await client.get(
-            create_url(
-                network_settings.scraper_port,
-                ScraperRoutes.SYNC + f"?link={preset.chat_folder_link}",
-                network_settings.scraper_host,
-            )
-        )
-
-    await ctx.preset_repo.add(
-        Preset(
-            preset_id=preset_id,
-            date_created=datetime.now().strftime(DB_DATE_FORMAT),
-            **preset.model_dump(),
-        ),
-    )
-    await ctx.up_repo.add(UserPreset(chat_id=chat_id, preset_id=preset_id))
-
-
 @app.post(SupervisorRoutes.FETCH)
 async def fetch(request: FetchRequest, response: Response):
     corr_id = correlation_id.get()
+    time = datetime.now()
     logger.info("Started fetching updates")
     configs: List[Config] = await ctx.config_repo.get()
     configs = list(filter(lambda config: not config.inactive, configs))
@@ -386,23 +110,99 @@ async def fetch(request: FetchRequest, response: Response):
         corr_id, request, EmbeddingSource(config.embedding_source)
     )
 
+    entries = TypeAdapter(list[Source]).validate_python(data)
+
     if data == []:
         response.status_code = status.HTTP_204_NO_CONTENT
         return {}
 
-    linked_data = (
-        await call_linker(
-            corr_id,
-            data,
-            EmbeddingSource(config.embedding_source),
-            LinkingMethod(config.linking_method),
-        )
-        if config.linking_method != LinkingMethod.NO_LINKER
-        else data["text"]
+    settings = linking_settings.model_dump()[config.embedding_source][
+        config.linking_method
+    ]
+
+    linking_config = LinkingConfig(
+        embedding_source=EmbeddingSource(config.embedding_source),
+        method=ClusteringMethod(config.linking_method),
+        scorer=settings["scorer"],
+        metric=settings["metric"],
     )
 
+    response = await call_linker(corr_id, data, linking_config)
+    stories_nums = response["results"][0]["stories_nums"]
+
+    uuids = [
+        uuid4() for _ in range(len(stories_nums) + len(stories_nums[-1]) - 1)
+    ]
+
+    stories_uuids = [
+        Story(story_id=i, request_id=UUID(corr_id)) for i in uuids
+    ]
+    await ctx.story_repo.add(stories_uuids)
+
+    entities = []
+    stories: List[tuple[UUID, List[Source]]] = []
+    uuid_num = 0
+    for i in range(len(stories_nums[:-1])):
+        stories.append((uuids[uuid_num], []))
+        for j in range(len(stories_nums[i])):
+            source = entries[stories_nums[i][j]]
+            entity = StorySource(
+                story_id=uuids[uuid_num],
+                source_id=source.source_id,
+                channel_id=source.channel_id,
+            )
+            entities.append(entity)
+            stories[i][1].append(source)
+
+        uuid_num += 1
+
+    # NOTE(sokunkov): We need to finally decide what we want to do
+    # with the noisy cluster
+    for i in range(len(stories_nums[-1])):
+        stories.append((uuids[uuid_num], []))
+        source = entries[stories_nums[-1][i]]
+        entity = StorySource(
+            story_id=uuids[uuid_num],
+            source_id=source.source_id,
+            channel_id=entries[stories_nums[-1][i]].channel_id,
+        )
+        entities.append(entity)
+        stories[-1][1].append(source)
+        uuid_num += 1
+
+    await ctx.ss_repo.add(entities)
+
+    weights = ctx.shared_settings.config.ranking.weights
+
+    stories = list(
+        map(
+            lambda t: (
+                t[0],
+                sorted(
+                    t[1],
+                    key=lambda x: datetime.strptime(x.date, DB_DATE_FORMAT),
+                ),
+            ),
+            stories,
+        )
+    )
+
+    stories = ctx.ranker.get_sorted(stories, weights=weights)
+
+    story_ids = list(map(lambda t: t[0], stories))
     logger.info("Finished fetching updates, sending response")
-    return {"config_id": config.config_id, "story_ids": linked_data}
+    elapsed = datetime.now() - time
+    request_entity = Request(
+        chat_id=request.chat_id,
+        request_id=UUID(corr_id),
+        request_type="fetch",
+        status="completed",
+        time_passed=elapsed,
+        config_id=config.config_id,
+    )
+    await ctx.request_repo.add(request_entity)
+
+    return {"config_id": config.config_id, "story_ids": story_ids}
 
 
 @app.post(SupervisorRoutes.SUMMARIZE)
@@ -416,7 +216,10 @@ async def summarize(request: SummarizeRequest):
     )[0]
     user = (await ctx.user_repo.get("chat_id", request.chat_id))[0]
     preset = (await ctx.preset_repo.get("preset_id", user.cur_preset))[0]
-    sources: list[Source] = await ctx.sp_repo.get("story_id", request.story_id)
+    sources: list[StorySources] = await ctx.ss_view.get(
+        "story_id", request.story_id
+    )
+    logger.debug(sources)
     story = list(map(lambda x: x.text, sources))
 
     response: dict[Any, Any] = {}
@@ -426,7 +229,7 @@ async def summarize(request: SummarizeRequest):
         logger.debug(f"Started generating {density.value} summary")
         if density == Density.TITLE:
             summary = await call_summarizer(
-                corr_id,
+                UUID(corr_id),
                 [response["summary"][Density.LARGE]["original"]],
                 config,
                 density,
@@ -434,7 +237,7 @@ async def summarize(request: SummarizeRequest):
             )
         else:
             summary = await call_summarizer(
-                corr_id, story, config, density, preset
+                UUID(corr_id), story, config, density, preset
             )
         logger.debug(f"Finished generating {density.value} summary")
         response["summary"][density] = summary
@@ -462,56 +265,7 @@ async def summarize(request: SummarizeRequest):
     await ctx.summary_repo.add(entities)
 
     response["references"] = list(map(lambda x: x.reference, sources))
+    logger.debug(f"Refs: {response['references']}")
 
     logger.info("Sending response with summarized news")
     return response
-
-
-@app.post(SupervisorRoutes.CALLBACK)
-async def set_callback(request: CallbackPostRequest):
-    callback_id = uuid4()
-    callback_row = Callback(
-        callback_id=callback_id,
-        callback_data=json.dumps(request.callback_data),
-    )
-    await ctx.callback_repository.add(callback_row)
-    return callback_id
-
-
-@app.get(SupervisorRoutes.CALLBACK + "/{callback_id}")
-async def get_callback(callback_id):
-    callback_data = await ctx.callback_repository.get(
-        "callback_id", callback_id
-    )
-    return json.loads(callback_data[0].callback_data)
-
-
-@app.patch(SupervisorRoutes.CALLBACK, status_code=204)
-async def update_callback(request: CallbackPatchRequest):
-    callback_row = Callback(
-        callback_id=request.callback_id,
-        callback_data=json.dumps(request.callback_data),
-    )
-    await ctx.callback_repository.update(callback_row, ["callback_data"])
-
-
-@app.post(SupervisorRoutes.CONFIG, status_code=204)
-async def add_config(request: ConfigPostRequest):
-    await ctx.config_repo.add(
-        Config(
-            config_id=request.config_id,
-            embedding_source=request.embedding_source,
-            linking_method=request.linking_method,
-            summary_method=request.summary_method,
-            editor_model=request.editor_model,
-            inactive=False,
-        ),
-    )
-
-
-@app.patch(SupervisorRoutes.CONFIG, status_code=204)
-async def drop_config(config_id: int):
-    config = (await ctx.config_repo.get("config_id", config_id))[0]
-    config.inactive = True
-
-    return await ctx.config_repo.update(config, ["inactive"])

@@ -1,9 +1,7 @@
-from typing import List
-
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
-from shared.models import JSONSettings, DistancesMetrics, LinkingScorers
+from shared.models import DistancesMetrics, JSONSettings, LinkingScorers
 
 
 class NetworkSettings(BaseSettings):
