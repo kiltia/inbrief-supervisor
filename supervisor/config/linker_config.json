@@ -52,6 +52,21 @@
             },
             "scorer": "silhouette",
             "metric": "cityblock"
+        },
+        "spectral" : {
+            "config": {
+                "params_range": {
+                    "n_clusters": [3, 40]
+                },
+                "immutable_config": {
+                    "eigen_solver": "arpack",
+                    "affinity": "rbf",
+                    "assign_labels":"kmeans"
+                },
+                "n_components": 30
+            },
+            "scorer": "silhouette",
+            "metric": "cityblock"
         }
     },
     "mlm" : {
@@ -102,6 +117,21 @@
                     "n_clusters": null,
                     "metric": "cityblock",
                     "linkage": "complete"
+                },
+                "n_components": 30
+            },
+            "scorer": "silhouette",
+            "metric": "cityblock"
+        },
+        "spectral" : {
+            "config": {
+                "params_range": {
+                    "n_clusters": [3, 40]
+                },
+                "immutable_config": {
+                    "eigen_solver": "arpack",
+                    "affinity": "rbf",
+                    "assign_labels":"kmeans"
                 },
                 "n_components": 30
             },
@@ -161,6 +191,21 @@
                 "n_components": 40
             },
             "scorer": "weighted_metrics",
+            "metric": "cityblock"
+        },
+        "spectral" : {
+            "config": {
+                "params_range": {
+                    "n_clusters": [3, 40]
+                },
+                "immutable_config": {
+                    "eigen_solver": "arpack",
+                    "affinity": "rbf",
+                    "assign_labels":"kmeans"
+                },
+                "n_components": 30
+            },
+            "scorer": "silhouette",
             "metric": "cityblock"
         }
     }
