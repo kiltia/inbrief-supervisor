@@ -16,7 +16,7 @@
         "optics" : {
             "config": {
                 "params_range": {
-                    "eps": [0.1, 17],
+                    "eps": [0.1, 17, 0.05],
                     "min_samples": [2, 15]
                 },
                 "immutable_config": {
@@ -41,7 +41,7 @@
         "agglomerative" : {
             "config": {
                 "params_range": {
-                    "distance_threshold": [1.6, 20]
+                    "distance_threshold": [0.5, 20, 0.05]
                 },
                 "immutable_config": {
                     "n_clusters": null,
@@ -71,7 +71,7 @@
         "optics" : {
             "config": {
                 "params_range": {
-                    "eps": [0.1, 5],
+                    "eps": [0.1, 5, 0.05],
                     "min_samples": [2, 15]
                 },
                 "immutable_config": {
@@ -96,7 +96,7 @@
         "agglomerative" : {
             "config": {
                 "params_range": {
-                    "distance_threshold": [1.6, 6]
+                    "distance_threshold": [0.5, 20, 0.05]
                 },
                 "immutable_config": {
                     "n_clusters": null,
@@ -126,7 +126,7 @@
         "optics" : {
             "config": {
                 "params_range": {
-                    "eps": [0.1, 5],
+                    "eps": [0.1, 5, 0.05],
                     "min_samples": [2, 15]
                 },
                 "immutable_config": {
@@ -151,7 +151,7 @@
         "agglomerative" : {
             "config": {
                 "params_range": {
-                    "distance_threshold": [1.6, 7]
+                    "distance_threshold": [0.5, 20, 0.05]
                 },
                 "immutable_config": {
                     "n_clusters": null,
