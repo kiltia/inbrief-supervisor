@@ -1,80 +1,212 @@
 {
     "openai" : {
-        "dbscan" : {
-            "eps" : 0.465,
-            "min_samples" : 2,
-            "metric" :"euclidean"
-        },
         "kmeans" : {
-            "min_samples":2,
-            "algorithm":"lloyd"
+            "config": {
+                "params_range": {
+                    "n_clusters": [3, 40]
+                },
+                "immutable_config": {
+                    "algorithm":"lloyd"
+                },
+                "n_components": 30
+            },
+            "scorer": "silhouette",
+            "metric": "cityblock"
         },
         "optics" : {
-            "min_samples":2,
-            "metric" :"minkowski",
-            "p":2,
-            "xi":0.005
+            "config": {
+                "params_range": {
+                    "eps": [0.1, 17, 0.05],
+                    "min_samples": [2, 15]
+                },
+                "immutable_config": {
+                    "metric": "cityblock",
+                    "cluster_method": "dbscan"
+                },
+                "n_components": 30
+            },
+            "scorer": "silhouette",
+            "metric": "cityblock"
         },
-        "affinity_propagation" : {
-            "min_samples":2,
-            "max_iter": 100
+        "hdbscan" : {
+            "config": {
+                "params_range": {
+                    "min_cluster_size": [3, 15]
+                },
+                "n_components": 30
+            },
+            "scorer": "silhouette",
+            "metric": "cityblock"
         },
-        "agglomerative_clustering" : {
-            "min_samples":2, 
-            "linkage":"ward",
-            "metric" :"euclidean"
-        }
-    }, 
-    "ft+mlm" : {
-        "dbscan" : {
-            "eps" : 0.425,
-            "min_samples" : 2,
-            "metric" :"l2"
+        "agglomerative" : {
+            "config": {
+                "params_range": {
+                    "distance_threshold": [0.5, 20, 0.05]
+                },
+                "immutable_config": {
+                    "n_clusters": null,
+                    "metric": "cityblock",
+                    "linkage": "complete"
+                },
+                "n_components": 30
+            },
+            "scorer": "silhouette",
+            "metric": "cityblock"
         },
-        "kmeans" : {
-            "min_samples":2,
-            "algorithm":"elkan"
-        },
-        "optics" : {
-            "min_samples":2,
-            "metric" :"minkowski",
-            "p":1,
-            "xi":0.12
-        },
-        "affinity_propagation" : {
-            "min_samples":2,
-            "max_iter": 6
-        },
-        "agglomerative_clustering" : {
-            "min_samples":2,
-            "linkage":"single",
-            "metric":"l2"
+        "spectral" : {
+            "config": {
+                "params_range": {
+                    "n_clusters": [3, 40]
+                },
+                "immutable_config": {
+                    "eigen_solver": "arpack",
+                    "affinity": "rbf",
+                    "assign_labels":"kmeans"
+                },
+                "n_components": 30
+            },
+            "scorer": "silhouette",
+            "metric": "cityblock"
         }
     },
     "mlm" : {
-        "dbscan" : {
-            "eps" : 0.425,
-            "min_samples" : 2,
-            "metric" :"l2"
-        },
         "kmeans" : {
-            "min_samples":2,
-            "algorithm":"elkan"
+            "config": {
+                "params_range": {
+                    "n_clusters": [3, 40]
+                },
+                "immutable_config": {
+                    "algorithm":"lloyd"
+                },
+                "n_components": 50
+            },
+            "scorer": "silhouette",
+            "metric": "cityblock"
         },
         "optics" : {
-            "min_samples":2,
-            "metric" :"minkowski",
-            "p":1,
-            "xi":0.17
+            "config": {
+                "params_range": {
+                    "eps": [0.1, 5, 0.05],
+                    "min_samples": [2, 15]
+                },
+                "immutable_config": {
+                    "metric": "cityblock",
+                    "cluster_method": "dbscan"
+                },
+                "n_components": 50
+            },
+            "scorer": "silhouette",
+            "metric": "cityblock"
         },
-        "affinity_propagation" : {
-            "min_samples":2,
-            "max_iter": 1000
+        "hdbscan" : {
+            "config": {
+                "params_range": {
+                    "min_cluster_size": [3, 15]
+                },
+                "n_components": 50
+            },
+            "scorer": "silhouette",
+            "metric": "cityblock"
         },
-        "agglomerative_clustering" : {
-            "min_samples":2,
-            "linkage":"single",
-            "metric":"l2"
+        "agglomerative" : {
+            "config": {
+                "params_range": {
+                    "distance_threshold": [0.5, 20, 0.05]
+                },
+                "immutable_config": {
+                    "n_clusters": null,
+                    "metric": "cityblock",
+                    "linkage": "complete"
+                },
+                "n_components": 30
+            },
+            "scorer": "silhouette",
+            "metric": "cityblock"
+        },
+        "spectral" : {
+            "config": {
+                "params_range": {
+                    "n_clusters": [3, 40]
+                },
+                "immutable_config": {
+                    "eigen_solver": "arpack",
+                    "affinity": "rbf",
+                    "assign_labels":"kmeans"
+                },
+                "n_components": 30
+            },
+            "scorer": "silhouette",
+            "metric": "cityblock"
+        }
+    },
+    "ft+mlm" : {
+        "kmeans" : {
+            "config": {
+                "params_range": {
+                    "n_clusters": [3, 40]
+                },
+                "immutable_config": {
+                    "algorithm":"lloyd"
+                },
+                "n_components": 50
+            },
+            "scorer": "silhouette",
+            "metric": "cityblock"
+        },
+        "optics" : {
+            "config": {
+                "params_range": {
+                    "eps": [0.1, 5, 0.05],
+                    "min_samples": [2, 15]
+                },
+                "immutable_config": {
+                    "metric": "cityblock",
+                    "cluster_method": "dbscan"
+                },
+                "n_components": 50
+            },
+            "scorer": "silhouette",
+            "metric": "cityblock"
+        },
+        "hdbscan" : {
+            "config": {
+                "params_range": {
+                    "min_cluster_size": [3, 15]
+                },
+                "n_components": 50
+            },
+            "scorer": "silhouette",
+            "metric": "cityblock"
+        },
+        "agglomerative" : {
+            "config": {
+                "params_range": {
+                    "distance_threshold": [0.5, 20, 0.05]
+                },
+                "immutable_config": {
+                    "n_clusters": null,
+                    "metric": "cityblock",
+                    "linkage": "complete"
+                },
+                "n_components": 40
+            },
+            "scorer": "weighted_metrics",
+            "metric": "cityblock"
+        },
+        "spectral" : {
+            "config": {
+                "params_range": {
+                    "n_clusters": [3, 40]
+                },
+                "immutable_config": {
+                    "eigen_solver": "arpack",
+                    "affinity": "rbf",
+                    "assign_labels":"kmeans"
+                },
+                "n_components": 30
+            },
+            "scorer": "silhouette",
+            "metric": "cityblock"
         }
     }
 }

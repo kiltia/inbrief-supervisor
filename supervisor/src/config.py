@@ -1,9 +1,7 @@
-from typing import List
-
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
-from shared.models import JSONSettings
+from shared.models import DistancesMetric, JSONSettings, LinkingScorer
 
 
 class NetworkSettings(BaseSettings):
@@ -20,48 +18,23 @@ class NetworkSettings(BaseSettings):
         super().__init__(_env_file=_env_file)
 
 
-class BM25Settings(BaseModel):
-    depth: int
-    threshold: float
-    semantic_threshold: List[float]
-    min_samples: int
+class ClusteringConfig(BaseModel):
+    params_range: dict
+    immutable_config: dict = {}
+    n_components: int
 
 
-class DBScanSettings(BaseModel):
-    eps: float
-    metric: str
-    min_samples: int
-
-
-class KMeansSettings(BaseModel):
-    algorithm: str
-    min_samples: int
-
-
-class OpticsSettings(BaseModel):
-    min_samples: int
-    metric: str
-    p: int
-    xi: float
-
-
-class AffinityPropagationSettings(BaseModel):
-    min_samples: int
-    max_iter: int
-
-
-class AgglomerativeClusteringSettings(BaseModel):
-    min_samples: int
-    linkage: str
-    metric: str
+class ClusteringSettings(BaseModel):
+    config: ClusteringConfig
+    scorer: LinkingScorer
+    metric: DistancesMetric
 
 
 class LinkerSettings(BaseModel):
-    dbscan: DBScanSettings
-    kmeans: KMeansSettings
-    optics: OpticsSettings
-    affinity_propagation: AffinityPropagationSettings
-    agglomerative_clustering: AgglomerativeClusteringSettings
+    kmeans: ClusteringSettings
+    optics: ClusteringSettings
+    agglomerative: ClusteringSettings
+    hdbscan: ClusteringSettings
 
 
 class LinkingSettings(JSONSettings):
