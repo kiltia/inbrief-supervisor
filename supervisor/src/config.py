@@ -1,9 +1,7 @@
-from typing import List
-
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
-from shared.models import JSONSettings, DistancesMetrics, LinkingScorers
+from shared.models import DistancesMetric, JSONSettings, LinkingScorer
 
 
 class NetworkSettings(BaseSettings):
@@ -28,8 +26,8 @@ class ClusteringConfig(BaseModel):
 
 class ClusteringSettings(BaseModel):
     config: ClusteringConfig
-    scorer: LinkingScorers
-    metric: DistancesMetrics
+    scorer: LinkingScorer
+    metric: DistancesMetric
 
 
 class LinkerSettings(BaseModel):
