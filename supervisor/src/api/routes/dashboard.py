@@ -9,11 +9,11 @@ from pydantic import TypeAdapter
 from shared.entities import Config, Request, StorySources
 from shared.models import (
     ClusteringMethod,
-    DistancesMetrics,
+    DistancesMetric,
     EmbeddingSource,
     Entry,
     LinkingConfig,
-    LinkingScorers,
+    LinkingScorer,
     PlotData,
 )
 from shared.routes import SupervisorRoutes
@@ -44,8 +44,8 @@ async def get_used_config(uuid: UUID):
     return LinkingConfig(
         embedding_source=EmbeddingSource(config.embedding_source),
         method=ClusteringMethod(config.linking_method),
-        scorer=LinkingScorers(settings["scorer"]),
-        metric=DistancesMetrics(settings["metric"]),
+        scorer=LinkingScorer(settings["scorer"]),
+        metric=DistancesMetric(settings["metric"]),
     )
 
 
