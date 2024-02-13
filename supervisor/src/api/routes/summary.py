@@ -17,7 +17,7 @@ async def get_cached_summary(summary_id: UUID):
     if not summaries:
         raise HTTPException(status_code=httpx.codes.BAD_REQUEST)
 
-    sources = await ctx.ss_repo.get("story_id", summaries[0].story_id)
+    sources = await ctx.ss_view.get("story_id", summaries[0].story_id)
     references = list(map(lambda x: x.reference, sources))
 
     small_summary = list(
