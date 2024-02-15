@@ -2,7 +2,6 @@ import logging
 from uuid import UUID
 
 import httpx
-from asgi_correlation_id import correlation_id
 from context import ctx, linking_settings, network_settings
 from fastapi import status
 from fastapi.exceptions import HTTPException
@@ -44,7 +43,6 @@ def verifiable_request(call):
                 raise HTTPException(
                     status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail=f"{call.__name__} is unavailable at the moment.",
-                    headers={"X-Request-ID": correlation_id.get() or ""},
                 )
 
     return wrapper
