@@ -117,12 +117,12 @@ async def fetch(request: FetchRequest, response: Response):
         return {}
 
     settings = linking_settings.model_dump()[config.embedding_source][
-        config.first_method
+        config.linking_method
     ]
 
     linking_config = LinkingConfig(
         embedding_source=EmbeddingSource(config.embedding_source),
-        method=ClusteringMethod(config.first_method),
+        method=ClusteringMethod(config.linking_method),
         scorer=settings["scorer"],
         metric=settings["metric"],
     )
