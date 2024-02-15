@@ -39,11 +39,11 @@ async def get_used_config(uuid: UUID):
     config = configs[0]
 
     settings = linking_settings.model_dump()[config.embedding_source][
-        config.first_method
+        config.linking_method
     ]
     return LinkingConfig(
         embedding_source=EmbeddingSource(config.embedding_source),
-        method=ClusteringMethod(config.first_method),
+        method=ClusteringMethod(config.linking_method),
         scorer=LinkingScorer(settings["scorer"]),
         metric=DistancesMetric(settings["metric"]),
     )
