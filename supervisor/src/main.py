@@ -117,12 +117,12 @@ async def fetch(request: FetchRequest, response: Response):
         return {}
 
     settings = linking_settings.model_dump()[config.embedding_source][
-        config.linking_method
+        config.first_method
     ]
 
     linking_config = LinkingConfig(
         embedding_source=EmbeddingSource(config.embedding_source),
-        method=ClusteringMethod(config.linking_method),
+        method=ClusteringMethod(config.first_method),
         scorer=settings["scorer"],
         metric=settings["metric"],
     )
@@ -134,8 +134,11 @@ async def fetch(request: FetchRequest, response: Response):
         uuid4() for _ in range(len(stories_nums) + len(stories_nums[-1]) - 1)
     ]
 
+    category_id = uuid4()
+
     stories_uuids = [
-        Story(story_id=i, request_id=UUID(corr_id)) for i in uuids
+        Story(story_id=i, request_id=UUID(corr_id), category_id=category_id)
+        for i in uuids
     ]
     await ctx.story_repo.add(stories_uuids)
 

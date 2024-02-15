@@ -14,7 +14,7 @@ async def add_config(request: ConfigPostRequest):
         Config(
             config_id=request.config_id,
             embedding_source=request.embedding_source,
-            linking_method=request.linking_method,
+            linking_method=request.first_method,
             summary_method=request.summary_method,
             editor_model=request.editor_model,
             inactive=False,
