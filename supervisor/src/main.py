@@ -15,9 +15,10 @@ import httpx
 from api.requests import call_linker, call_scraper, call_summarizer
 from asgi_correlation_id import CorrelationIdMiddleware, correlation_id
 from context import ctx, linking_settings
-from fastapi import FastAPI, Response, status
+from fastapi import FastAPI
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import TypeAdapter
 
 from shared.entities import (
@@ -35,6 +36,7 @@ from shared.models import (
     Density,
     EmbeddingSource,
     FetchRequest,
+    FetchResponse,
     LinkingConfig,
     SummarizeRequest,
 )
@@ -84,19 +86,15 @@ async def hello():
     return {"message": "Supervisor API is running"}
 
 
-@app.post(SupervisorRoutes.FETCH)
-async def fetch(request: FetchRequest, response: Response):
-    corr_id = correlation_id.get()
-    time = datetime.now()
-    logger.info("Started fetching updates")
-    configs: List[Config] = await ctx.config_repo.get()
+async def retrieve_config(config_id) -> Config:
+    configs: list[Config] = await ctx.config_repo.get()
     configs = list(filter(lambda config: not config.inactive, configs))
-    if not request.config_id:
+    if not config_id:
         config = random.choice(configs)
         logger.debug(f"Using random config ID: {config.config_id}")
     else:
         filtered_configs = list(
-            filter(lambda x: x.config_id == request.config_id, configs)
+            filter(lambda x: x.config_id == config_id, configs)
         )
         if not filtered_configs:
             raise HTTPException(
@@ -106,19 +104,43 @@ async def fetch(request: FetchRequest, response: Response):
             config = filtered_configs[0]
         logger.debug("Using requested config ID: {config.config_id}")
 
+    return config
+
+
+def link_entity(clusters, texts):
+    return list(map(lambda x: list(map(lambda y: texts[y], x)), clusters))
+
+
+@app.post(
+    SupervisorRoutes.FETCH,
+    response_model=FetchResponse,
+    responses={204: {"model": None}},
+)
+async def fetch(request: FetchRequest):
+    corr_id = UUID(correlation_id.get())
+    time = datetime.now()
+    logger.info("Started fetching updates")
+
+    config = await retrieve_config(request.config_id)
     data = await call_scraper(
         corr_id, request, EmbeddingSource(config.embedding_source)
     )
-
     entries = TypeAdapter(list[Source]).validate_python(data)
 
     if data == []:
-        response.status_code = status.HTTP_204_NO_CONTENT
-        return {}
-
+        return JSONResponse(
+            status_code=204, content={"message": "Nothing was found"}
+        )
     settings = linking_settings.model_dump()[config.embedding_source][
         config.linking_method
     ]
+
+    categorizer_config = LinkingConfig(
+        embedding_source=EmbeddingSource(config.embedding_source),
+        method=ClusteringMethod(config.categorize_method),
+        scorer=settings["scorer"],
+        metric=settings["metric"],
+    )
 
     linking_config = LinkingConfig(
         embedding_source=EmbeddingSource(config.embedding_source),
@@ -127,74 +149,96 @@ async def fetch(request: FetchRequest, response: Response):
         metric=settings["metric"],
     )
 
-    response = await call_linker(corr_id, data, linking_config)
-    stories_nums = response["results"][0]["stories_nums"]
+    response = await call_linker(corr_id, data, categorizer_config)
+    category_nums = response["results"][0]["stories_nums"]
 
-    uuids = [
-        uuid4() for _ in range(len(stories_nums) + len(stories_nums[-1]) - 1)
-    ]
+    uuids = [uuid4() for _ in range(len(category_nums))]
 
-    stories_uuids = [
-        Story(story_id=i, request_id=UUID(corr_id)) for i in uuids
-    ]
-    await ctx.story_repo.add(stories_uuids)
+    categorized_posts = link_entity(category_nums, data)
 
-    entities = []
-    stories: List[tuple[UUID, List[Source]]] = []
-    uuid_num = 0
-    for i in range(len(stories_nums[:-1])):
-        stories.append((uuids[uuid_num], []))
-        for j in range(len(stories_nums[i])):
-            source = entries[stories_nums[i][j]]
-            entity = StorySource(
-                story_id=uuids[uuid_num],
-                source_id=source.source_id,
-                channel_id=source.channel_id,
-            )
-            entities.append(entity)
-            stories[i][1].append(source)
-
-        uuid_num += 1
-
-    # NOTE(sokunkov): We need to finally decide what we want to do
-    # with the noisy cluster
-    for i in range(len(stories_nums[-1])):
-        stories.append((uuids[uuid_num], []))
-        source = entries[stories_nums[-1][i]]
-        entity = StorySource(
-            story_id=uuids[uuid_num],
-            source_id=source.source_id,
-            channel_id=entries[stories_nums[-1][i]].channel_id,
-        )
-        entities.append(entity)
-        stories[-1][1].append(source)
-        uuid_num += 1
-
-    await ctx.ss_repo.add(entities)
-
-    weights = ctx.shared_settings.config.ranking.weights
-
-    stories = list(
-        map(
-            lambda t: (
-                t[0],
-                sorted(
-                    t[1],
-                    key=lambda x: datetime.strptime(x.date, DB_DATE_FORMAT),
+    categories: dict[UUID, list[UUID]] = {}
+    # TODO(nrydanov): Make requests parallel
+    for i, category in enumerate(categorized_posts):
+        logger.debug(len(category))
+        if len(category) < 1:
+            continue
+        linker_response = await call_linker(corr_id, category, linking_config)
+        stories_nums = linker_response["results"][0]["stories_nums"]
+        story_uuids = [
+            uuid4()
+            for _ in range(len(stories_nums) + len(stories_nums[-1]) - 1)
+        ]
+        story_entities = list(
+            map(
+                lambda x: Story(
+                    story_id=x, request_id=corr_id, category_id=uuids[i]
                 ),
-            ),
-            stories,
+                story_uuids,
+            )
         )
-    )
 
-    stories = ctx.ranker.get_sorted(stories, weights=weights)
+        await ctx.story_repo.add(story_entities)
 
-    story_ids = list(map(lambda t: t[0], stories))
+        entities = []
+        stories: list[tuple[UUID, List[Source]]] = []
+        uuid_num = 0
+        for i in range(len(stories_nums[:-1])):
+            stories.append((story_uuids[uuid_num], []))
+            for j in range(len(stories_nums[i])):
+                source = entries[stories_nums[i][j]]
+                entity = StorySource(
+                    story_id=story_uuids[uuid_num],
+                    source_id=source.source_id,
+                    channel_id=source.channel_id,
+                )
+                entities.append(entity)
+                stories[i][1].append(source)
+
+            uuid_num += 1
+
+        # NOTE(sokunkov): We need to finally decide what we want to do
+        # with the noisy cluster
+        # TODO(nrydanov): Decide what should we do with noise
+        # for i in range(len(stories_nums[-1])):
+        #     stories.append((story_uuids[uuid_num], []))
+        #     source = entries[stories_nums[-1][i]]
+        #     entity = StorySource(
+        #         story_id=story_uuids[uuid_num],
+        #         source_id=source.source_id,
+        #         channel_id=entries[stories_nums[-1][i]].channel_id,
+        #     )
+        #     entities.append(entity)
+        #     stories[-1][1].append(source)
+        #     uuid_num += 1
+
+        await ctx.ss_repo.add(entities)
+
+        weights = ctx.shared_settings.config.ranking.weights
+        stories = list(
+            map(
+                lambda t: (
+                    t[0],
+                    sorted(
+                        t[1],
+                        key=lambda x: datetime.strptime(
+                            x.date, DB_DATE_FORMAT
+                        ),
+                    ),
+                ),
+                stories,
+            )
+        )
+
+        stories = ctx.ranker.get_sorted(stories, weights=weights)
+        story_ids = list(map(lambda t: t[0], stories))
+        categories[uuids[i]] = story_ids
+
     logger.info("Finished fetching updates, sending response")
+    logger.info(categories)
     elapsed = datetime.now() - time
     request_entity = Request(
         chat_id=request.chat_id,
-        request_id=UUID(corr_id),
+        request_id=corr_id,
         request_type="fetch",
         status="completed",
         time_passed=elapsed,
@@ -202,7 +246,9 @@ async def fetch(request: FetchRequest, response: Response):
     )
     await ctx.request_repo.add(request_entity)
 
-    return {"config_id": config.config_id, "story_ids": story_ids}
+    return TypeAdapter(FetchResponse).validate_python(
+        {"config_id": config.config_id, "categories": categories}
+    )
 
 
 @app.post(SupervisorRoutes.SUMMARIZE)
