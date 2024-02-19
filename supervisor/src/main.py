@@ -161,7 +161,6 @@ async def fetch(request: FetchRequest):
     categories: list[CategoryEntry] = []
     # TODO(nrydanov): Make requests parallel
     for n, category in enumerate(categorized_posts):
-        logger.debug(len(category))
         if len(category) < 1:
             continue
         linker_response = await call_linker(corr_id, category, linking_config)
@@ -237,7 +236,6 @@ async def fetch(request: FetchRequest):
         categories.append(CategoryEntry(uuid=uuids[n], stories=story_entries))
 
     logger.info("Finished fetching updates, sending response")
-    logger.info(categories)
     elapsed = datetime.now() - time
     request_entity = Request(
         chat_id=request.chat_id,
@@ -313,7 +311,6 @@ async def summarize(request: SummarizeRequest):
     await ctx.summary_repo.add(entities)
 
     response["references"] = list(map(lambda x: x.reference, sources))
-    logger.debug(f"Refs: {response['references']}")
 
     logger.info("Sending response with summarized news")
     return response

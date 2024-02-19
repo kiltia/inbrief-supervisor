@@ -190,7 +190,7 @@
                 },
                 "n_components": 40
             },
-            "scorer": "weighted_metrics",
+            "scorer": "weighted_scorer",
             "metric": "cityblock"
         },
         "spectral" : {
