@@ -32,12 +32,14 @@ from shared.entities import (
 )
 from shared.logger import configure_logging
 from shared.models import (
+    CategoryEntry,
     ClusteringMethod,
     Density,
     EmbeddingSource,
     FetchRequest,
     FetchResponse,
     LinkingConfig,
+    StoryEntry,
     SummarizeRequest,
 )
 from shared.routes import (
@@ -156,9 +158,9 @@ async def fetch(request: FetchRequest):
 
     categorized_posts = link_entity(category_nums, data)
 
-    categories: dict[UUID, list[UUID]] = {}
+    categories: list[CategoryEntry] = []
     # TODO(nrydanov): Make requests parallel
-    for i, category in enumerate(categorized_posts):
+    for n, category in enumerate(categorized_posts):
         logger.debug(len(category))
         if len(category) < 1:
             continue
@@ -171,7 +173,7 @@ async def fetch(request: FetchRequest):
         story_entities = list(
             map(
                 lambda x: Story(
-                    story_id=x, request_id=corr_id, category_id=uuids[i]
+                    story_id=x, request_id=corr_id, category_id=uuids[n]
                 ),
                 story_uuids,
             )
@@ -183,7 +185,7 @@ async def fetch(request: FetchRequest):
         stories: list[tuple[UUID, List[Source]]] = []
         uuid_num = 0
         for i in range(len(stories_nums[:-1])):
-            stories.append((story_uuids[uuid_num], []))
+            stories.append((StoryEntry(uuid=story_uuids[uuid_num]), []))
             for j in range(len(stories_nums[i])):
                 source = entries[stories_nums[i][j]]
                 entity = StorySource(
@@ -196,24 +198,25 @@ async def fetch(request: FetchRequest):
 
             uuid_num += 1
 
-        # NOTE(sokunkov): We need to finally decide what we want to do
-        # with the noisy cluster
-        # TODO(nrydanov): Decide what should we do with noise
-        # for i in range(len(stories_nums[-1])):
-        #     stories.append((story_uuids[uuid_num], []))
-        #     source = entries[stories_nums[-1][i]]
-        #     entity = StorySource(
-        #         story_id=story_uuids[uuid_num],
-        #         source_id=source.source_id,
-        #         channel_id=entries[stories_nums[-1][i]].channel_id,
-        #     )
-        #     entities.append(entity)
-        #     stories[-1][1].append(source)
-        #     uuid_num += 1
+        for i in range(len(stories_nums[-1])):
+            logger.info(len(stories_nums[-1]))
+            stories.append(
+                (StoryEntry(uuid=story_uuids[uuid_num], noise=True), [])
+            )
+            source = entries[stories_nums[-1][i]]
+            entity = StorySource(
+                story_id=story_uuids[uuid_num],
+                source_id=source.source_id,
+                channel_id=entries[stories_nums[-1][i]].channel_id,
+            )
+            entities.append(entity)
+            stories[-1][1].append(source)
+            uuid_num += 1
 
         await ctx.ss_repo.add(entities)
 
         weights = ctx.shared_settings.config.ranking.weights
+        # NOTE(nrydanov): Dates sorting
         stories = list(
             map(
                 lambda t: (
@@ -230,8 +233,8 @@ async def fetch(request: FetchRequest):
         )
 
         stories = ctx.ranker.get_sorted(stories, weights=weights)
-        story_ids = list(map(lambda t: t[0], stories))
-        categories[uuids[i]] = story_ids
+        story_entries = list(map(lambda t: t[0], stories))
+        categories.append(CategoryEntry(uuid=uuids[n], stories=story_entries))
 
     logger.info("Finished fetching updates, sending response")
     logger.info(categories)
