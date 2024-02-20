@@ -157,10 +157,12 @@ async def fetch(request: FetchRequest):
     uuids = [uuid4() for _ in range(len(category_nums))]
 
     categorized_posts = link_entity(category_nums, data)
+    categorized_entries = link_entity(category_nums, entries)
 
     categories: list[CategoryEntry] = []
     # TODO(nrydanov): Make requests parallel
-    for n, category in enumerate(categorized_posts):
+    for n in range(len(categorized_posts)):
+        category, entries = categorized_posts[n], categorized_entries[n]
         if len(category) < 1:
             continue
         linker_response = await call_linker(corr_id, category, linking_config)
@@ -198,15 +200,15 @@ async def fetch(request: FetchRequest):
             uuid_num += 1
 
         for i in range(len(stories_nums[-1])):
-            logger.info(len(stories_nums[-1]))
             stories.append(
                 (StoryEntry(uuid=story_uuids[uuid_num], noise=True), [])
             )
+            logger.info(f"ABOBA {stories_nums[-1][i]}")
             source = entries[stories_nums[-1][i]]
             entity = StorySource(
                 story_id=story_uuids[uuid_num],
                 source_id=source.source_id,
-                channel_id=entries[stories_nums[-1][i]].channel_id,
+                channel_id=source.channel_id,
             )
             entities.append(entity)
             stories[-1][1].append(source)
