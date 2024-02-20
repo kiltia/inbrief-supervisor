@@ -35,6 +35,7 @@ class LinkerSettings(BaseModel):
     optics: ClusteringSettings
     agglomerative: ClusteringSettings
     hdbscan: ClusteringSettings
+    spectral: ClusteringSettings
 
 
 class LinkingSettings(JSONSettings):

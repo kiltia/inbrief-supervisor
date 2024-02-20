@@ -98,7 +98,7 @@ async def call_linker(
     return_plot_data: bool = False,
 ) -> httpx.Response:
     logger.info("Creating a new linker request")
-
+    logger.info(linking_settings.model_dump()[config.embedding_source.value])
     settings = linking_settings.model_dump()[config.embedding_source.value][
         config.method.value
     ]
