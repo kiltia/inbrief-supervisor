@@ -36,6 +36,7 @@ from shared.models import (
     EmbeddingSource,
     FetchRequest,
     LinkingConfig,
+    ParseResponse,
     SummarizeRequest,
 )
 from shared.routes import (
@@ -110,11 +111,16 @@ async def fetch(request: FetchRequest, response: Response):
         corr_id, request, EmbeddingSource(config.embedding_source)
     )
 
-    entries = TypeAdapter(list[Source]).validate_python(data)
+    typed_body = TypeAdapter(ParseResponse).validate_python(data)
+    entries = typed_body.sources
+    skipped_channel_ids = typed_body.skipped_channel_ids
 
-    if data == []:
+    if not entries:
         response.status_code = status.HTTP_204_NO_CONTENT
-        return {}
+        return {"skipped_channel_ids": skipped_channel_ids}
+
+    if skipped_channel_ids:
+        logger.debug(f"A few channels were skipped by scraper: {skipped_channel_ids}")
 
     settings = linking_settings.model_dump()[config.embedding_source][
         config.linking_method
@@ -127,7 +133,7 @@ async def fetch(request: FetchRequest, response: Response):
         metric=settings["metric"],
     )
 
-    response = await call_linker(corr_id, data, linking_config)
+    response = await call_linker(corr_id, entries, linking_config)
     stories_nums = response["results"][0]["stories_nums"]
 
     uuids = [
@@ -202,7 +208,11 @@ async def fetch(request: FetchRequest, response: Response):
     )
     await ctx.request_repo.add(request_entity)
 
-    return {"config_id": config.config_id, "story_ids": story_ids}
+    return {
+        "config_id": config.config_id,
+        "story_ids": story_ids,
+        "skipped_channel_ids": skipped_channel_ids
+    }
 
 
 @app.post(SupervisorRoutes.SUMMARIZE)

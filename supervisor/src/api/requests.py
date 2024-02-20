@@ -111,7 +111,7 @@ async def call_linker(
                 network_settings.linker_host,
             ),
             json={
-                "entries": data,
+                "entries": [e.model_dump() for e in data],
                 "config": config.model_dump(),
                 "settings": settings["config"],
                 "return_plot_data": return_plot_data,
