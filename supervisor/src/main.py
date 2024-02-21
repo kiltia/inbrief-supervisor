@@ -33,6 +33,7 @@ from shared.entities import (
 from shared.logger import configure_logging
 from shared.models import (
     CategoryEntry,
+    CategoryTitleRequest,
     ClusteringMethod,
     Density,
     EmbeddingSource,
@@ -203,7 +204,6 @@ async def fetch(request: FetchRequest):
             stories.append(
                 (StoryEntry(uuid=story_uuids[uuid_num], noise=True), [])
             )
-            logger.info(f"ABOBA {stories_nums[-1][i]}")
             source = entries[stories_nums[-1][i]]
             entity = StorySource(
                 story_id=story_uuids[uuid_num],
@@ -315,4 +315,28 @@ async def summarize(request: SummarizeRequest):
     response["references"] = list(map(lambda x: x.reference, sources))
 
     logger.info("Sending response with summarized news")
+    return response
+
+
+@app.post(SupervisorRoutes.CATEGORY_TITLE)
+async def get_category_title(request: CategoryTitleRequest):
+    corr_id = correlation_id.get()
+    logger.info("Started serving category title request")
+    config: Config = (
+        await ctx.config_repo.get("config_id", request.config_id)
+    )[0]
+    user = (await ctx.user_repo.get("chat_id", request.chat_id))[0]
+    preset = (await ctx.preset_repo.get("preset_id", user.cur_preset))[0]
+
+    logger.debug("Started generating tittle for category")
+    title = await call_summarizer(
+        UUID(corr_id),
+        request.texts,
+        config,
+        Density.TITLE,
+        preset,
+    )
+    response = {"title": title}
+
+    logger.info("Sending response with category title")
     return response
