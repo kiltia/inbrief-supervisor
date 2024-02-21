@@ -22,7 +22,7 @@ router = APIRouter()
 
 adapter = TypeAdapter(PlotData)
 
-logger = logging.getLogger("app")
+logger = logging.getLogger("dash")
 
 
 @router.post(SupervisorRoutes.DASH + "/config")

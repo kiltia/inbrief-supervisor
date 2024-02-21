@@ -77,7 +77,7 @@ async def unhandled_exception_handler(request, exc: Exception):
     )
 
 
-logger = logging.getLogger("app")
+logger = logging.getLogger("supervisor")
 
 
 @app.get("/")
@@ -120,7 +120,9 @@ async def fetch(request: FetchRequest, response: Response):
         return {"skipped_channel_ids": skipped_channel_ids}
 
     if skipped_channel_ids:
-        logger.debug(f"A few channels were skipped by scraper: {skipped_channel_ids}")
+        logger.debug(
+            f"A few channels were skipped by scraper: {skipped_channel_ids}"
+        )
 
     settings = linking_settings.model_dump()[config.embedding_source][
         config.linking_method
@@ -211,7 +213,7 @@ async def fetch(request: FetchRequest, response: Response):
     return {
         "config_id": config.config_id,
         "story_ids": story_ids,
-        "skipped_channel_ids": skipped_channel_ids
+        "skipped_channel_ids": skipped_channel_ids,
     }
 
 
