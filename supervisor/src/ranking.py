@@ -6,7 +6,7 @@ from rb_tocase import Case
 
 from shared.entities import Source
 
-logger = logging.getLogger("app")
+logger = logging.getLogger("supervisor")
 
 
 class AbstractScorer:
