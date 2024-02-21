@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 import api.routes.callback as callback_routes
 import api.routes.config as config_routes
 import api.routes.dashboard as dashboard_routes
+import api.routes.feedback as feedback_routes
 import api.routes.preset as preset_routes
 import api.routes.summary as summary_routes
 import api.routes.user as user_routes
@@ -61,6 +62,7 @@ app.include_router(dashboard_routes.router)
 app.include_router(preset_routes.router)
 app.include_router(summary_routes.router)
 app.include_router(user_routes.router)
+app.include_router(feedback_routes.router)
 
 app.add_middleware(CorrelationIdMiddleware, validator=None)
 
