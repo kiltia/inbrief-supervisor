@@ -18,7 +18,7 @@ from shared.models import (
 )
 from shared.routes import LinkerRoutes, ScraperRoutes, SummarizerRoutes
 
-logger = logging.getLogger("app")
+logger = logging.getLogger("supervisor")
 
 
 # TODO(nrydanov): Add detailed verification for all possible situations (#80)
