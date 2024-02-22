@@ -159,7 +159,8 @@ async def fetch(request: FetchRequest):
     category_nums = ctx.ranker.get_sorted(
         zip(
             unsorted_category_nums,
-            link_entity(unsorted_category_nums, entries), strict=False,
+            link_entity(unsorted_category_nums, entries),
+            strict=False,
         ),
         weights=weights,
     )
