@@ -152,8 +152,18 @@ async def fetch(request: FetchRequest):
         metric=settings["metric"],
     )
 
+    weights = ctx.shared_settings.config.ranking.weights
+
     response = await call_linker(corr_id, data, categorizer_config)
-    category_nums = response["results"][0]["stories_nums"]
+    unsorted_category_nums = response["results"][0]["stories_nums"]
+    category_nums = ctx.ranker.get_sorted(
+        zip(
+            unsorted_category_nums,
+            link_entity(unsorted_category_nums, entries), strict=False,
+        ),
+        weights=weights,
+    )
+    category_nums = list(map(lambda t: t[0], category_nums))
 
     uuids = [uuid4() for _ in range(len(category_nums))]
 
@@ -216,7 +226,6 @@ async def fetch(request: FetchRequest):
 
         await ctx.ss_repo.add(entities)
 
-        weights = ctx.shared_settings.config.ranking.weights
         # NOTE(nrydanov): Dates sorting
         stories = list(
             map(
@@ -232,7 +241,6 @@ async def fetch(request: FetchRequest):
                 stories,
             )
         )
-
         stories = ctx.ranker.get_sorted(stories, weights=weights)
         story_entries = list(map(lambda t: t[0], stories))
         categories.append(CategoryEntry(uuid=uuids[n], stories=story_entries))
