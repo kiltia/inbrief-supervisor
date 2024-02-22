@@ -18,4 +18,4 @@ async def send_summary_feedback(request: UserFeedbackRequest):
 
     summary = next(filter(lambda s: s.density == request.density, summaries))
     summary.feedback = request.feedback
-    await ctx.summary_repo.update(summary, ['feedback'])
+    await ctx.summary_repo.update(summary, ["feedback"])
