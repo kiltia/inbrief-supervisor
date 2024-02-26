@@ -33,6 +33,7 @@ from shared.entities import (
 from shared.logger import configure_logging
 from shared.models import (
     CategoryEntry,
+    CategoryTitleRequest,
     ClusteringMethod,
     Density,
     EmbeddingSource,
@@ -151,16 +152,29 @@ async def fetch(request: FetchRequest):
         metric=settings["metric"],
     )
 
+    weights = ctx.shared_settings.config.ranking.weights
+
     response = await call_linker(corr_id, data, categorizer_config)
-    category_nums = response["results"][0]["stories_nums"]
+    unsorted_category_nums = response["results"][0]["stories_nums"]
+    category_nums = ctx.ranker.get_sorted(
+        zip(
+            unsorted_category_nums,
+            link_entity(unsorted_category_nums, entries),
+            strict=False,
+        ),
+        weights=weights,
+    )
+    category_nums = list(map(lambda t: t[0], category_nums))
 
     uuids = [uuid4() for _ in range(len(category_nums))]
 
     categorized_posts = link_entity(category_nums, data)
+    categorized_entries = link_entity(category_nums, entries)
 
     categories: list[CategoryEntry] = []
     # TODO(nrydanov): Make requests parallel
-    for n, category in enumerate(categorized_posts):
+    for n in range(len(categorized_posts)):
+        category, entries = categorized_posts[n], categorized_entries[n]
         if len(category) < 1:
             continue
         linker_response = await call_linker(corr_id, category, linking_config)
@@ -198,7 +212,6 @@ async def fetch(request: FetchRequest):
             uuid_num += 1
 
         for i in range(len(stories_nums[-1])):
-            logger.info(len(stories_nums[-1]))
             stories.append(
                 (StoryEntry(uuid=story_uuids[uuid_num], noise=True), [])
             )
@@ -206,7 +219,7 @@ async def fetch(request: FetchRequest):
             entity = StorySource(
                 story_id=story_uuids[uuid_num],
                 source_id=source.source_id,
-                channel_id=entries[stories_nums[-1][i]].channel_id,
+                channel_id=source.channel_id,
             )
             entities.append(entity)
             stories[-1][1].append(source)
@@ -214,7 +227,6 @@ async def fetch(request: FetchRequest):
 
         await ctx.ss_repo.add(entities)
 
-        weights = ctx.shared_settings.config.ranking.weights
         # NOTE(nrydanov): Dates sorting
         stories = list(
             map(
@@ -230,7 +242,6 @@ async def fetch(request: FetchRequest):
                 stories,
             )
         )
-
         stories = ctx.ranker.get_sorted(stories, weights=weights)
         story_entries = list(map(lambda t: t[0], stories))
         categories.append(CategoryEntry(uuid=uuids[n], stories=story_entries))
@@ -313,4 +324,28 @@ async def summarize(request: SummarizeRequest):
     response["references"] = list(map(lambda x: x.reference, sources))
 
     logger.info("Sending response with summarized news")
+    return response
+
+
+@app.post(SupervisorRoutes.CATEGORY_TITLE)
+async def get_category_title(request: CategoryTitleRequest):
+    corr_id = correlation_id.get()
+    logger.info("Started serving category title request")
+    config: Config = (
+        await ctx.config_repo.get("config_id", request.config_id)
+    )[0]
+    user = (await ctx.user_repo.get("chat_id", request.chat_id))[0]
+    preset = (await ctx.preset_repo.get("preset_id", user.cur_preset))[0]
+
+    logger.debug("Started generating tittle for category")
+    title = await call_summarizer(
+        UUID(corr_id),
+        request.texts,
+        config,
+        Density.TITLE,
+        preset,
+    )
+    response = {"title": title}
+
+    logger.info("Sending response with category title")
     return response
