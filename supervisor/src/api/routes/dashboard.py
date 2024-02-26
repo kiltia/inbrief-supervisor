@@ -39,7 +39,7 @@ async def get_used_config(uuid: UUID):
     config = configs[0]
 
     settings = linking_settings.model_dump()[config.embedding_source][
-        config.linking_method
+        config.categorize_method
     ]
     return LinkingConfig(
         embedding_source=EmbeddingSource(config.embedding_source),
