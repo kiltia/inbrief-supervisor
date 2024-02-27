@@ -53,9 +53,9 @@ async def get_used_config(uuid: UUID):
 async def get_dashboard_data(uuid: UUID, config: LinkingConfig):
     data: list[StorySources] = await ctx.ss_view.get("request_id", uuid)
 
-    entries = list(
+    entries: list[Entry] = list(
         map(
-            lambda x: Entry(text=x.text, embeddings=x.embeddings).model_dump(),
+            lambda x: Entry(text=x.text, embeddings=x.embeddings),
             data,
         )
     )

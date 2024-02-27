@@ -19,8 +19,10 @@ async def save_category_to_db(
     story_uuids = list(map(lambda x: x[0], entries))
     story_entities = list(
         map(
-            lambda x: Story(
-                story_id=x, request_id=request_id, category_id=category_id
+            lambda story_id: Story(
+                story_id=story_id,
+                request_id=request_id,
+                category_id=category_id,
             ),
             story_uuids,
         )

@@ -7,10 +7,11 @@ from fastapi import status
 from fastapi.exceptions import HTTPException
 from utils import REQUEST_TIMEOUT, create_url, form_scraper_request
 
-from shared.entities import Config, Preset, Source, User
+from shared.entities import Config, Preset, User
 from shared.models import (
     Density,
     EmbeddingSource,
+    Entry,
     FetchRequest,
     LinkingConfig,
     OpenAIModels,
@@ -92,7 +93,7 @@ async def call_scraper(
 @verifiable_request
 async def call_linker(
     corr_id: UUID,
-    sources: list[Source],
+    entries: list[Entry],
     config: LinkingConfig,
     *,
     return_plot_data: bool = False,
@@ -110,7 +111,7 @@ async def call_linker(
                 network_settings.linker_host,
             ),
             json={
-                "entries": [e.model_dump() for e in sources],
+                "entries": [e.model_dump() for e in entries],
                 "config": config.model_dump(),
                 "settings": settings["config"],
                 "return_plot_data": return_plot_data,

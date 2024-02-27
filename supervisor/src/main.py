@@ -91,7 +91,7 @@ async def hello():
 
 
 async def clusterize(
-    request_id, embedding_source, clustering_method, sources
+    request_id, embedding_source, clustering_method, entries
 ) -> list[tuple[UUID, list[Source]]]:
     settings = linking_settings.model_dump()[embedding_source][
         clustering_method
@@ -105,13 +105,13 @@ async def clusterize(
     )
 
     weights = ctx.shared_settings.config.ranking.weights
-    response = await call_linker(request_id, sources, linking_config)
+    response = await call_linker(request_id, entries, linking_config)
     unsorted_category_nums = response["results"][0]["stories_nums"]
     uuids = [uuid4() for _ in range(len(unsorted_category_nums))]
     clusters = ctx.ranker.get_sorted(
         zip(
             uuids,
-            link_entity(unsorted_category_nums, sources),
+            link_entity(unsorted_category_nums, entries),
             strict=False,
         ),
         weights=weights,
@@ -166,12 +166,16 @@ async def fetch(request: FetchRequest, response: Response):
         await save_category_to_db(corr_id, category_id, stories)
 
         story_entries: list[StoryEntry] = []
-        for story in stories:
+        for story in stories[:-1]:
             story_id = story[0]
             await save_stories_to_db(story_id, story[1])
             story_entries.append(StoryEntry(uuid=story_id, noise=False))
 
-        # NOTE(nrydanov): Dates sorting
+        noise_ids = [uuid4() for _ in range(len(stories[-1][1]))]
+        for uuid, noise_story in zip(noise_ids, stories[-1][1], strict=True):
+            await save_stories_to_db(uuid, [noise_story])
+            story_entries.append(StoryEntry(uuid=uuid, noise=True))
+
         category_entries.append(
             CategoryEntry(uuid=category_id, stories=story_entries)
         )
