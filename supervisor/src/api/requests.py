@@ -92,7 +92,7 @@ async def call_scraper(
 @verifiable_request
 async def call_linker(
     corr_id: UUID,
-    data: list[Source],
+    sources: list[Source],
     config: LinkingConfig,
     *,
     return_plot_data: bool = False,
@@ -110,7 +110,7 @@ async def call_linker(
                 network_settings.linker_host,
             ),
             json={
-                "entries": [e.model_dump() for e in data],
+                "entries": [e.model_dump() for e in sources],
                 "config": config.model_dump(),
                 "settings": settings["config"],
                 "return_plot_data": return_plot_data,
