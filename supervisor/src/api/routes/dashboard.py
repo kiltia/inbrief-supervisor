@@ -43,7 +43,7 @@ async def get_used_config(uuid: UUID):
     ]
     return LinkingConfig(
         embedding_source=EmbeddingSource(config.embedding_source),
-        method=ClusteringMethod(config.linking_method),
+        method=ClusteringMethod(config.categorize_method),
         scorer=LinkingScorer(settings["scorer"]),
         metric=DistancesMetric(settings["metric"]),
     )
