@@ -128,6 +128,7 @@ async def call_summarizer(
     config: Config,
     density: Density,
     preset: Preset,
+    edit: bool = True,
 ):
     logger.info("Creating a new summarizer request")
     summary_method = (
@@ -144,12 +145,14 @@ async def call_summarizer(
         "summary_method": summary_method,
         "config": {
             "summary_model": summary_model,
-            "editor_config": {
-                "style": preset.editor_prompt,
-                "model": config.editor_model,
-            },
         },
     }
+
+    if edit:
+        body["config"]["editor_config"] = {
+            "style": preset.editor_prompt,
+            "model": config.editor_model,
+        }
 
     async with httpx.AsyncClient() as client:
         response = await client.post(

@@ -344,6 +344,7 @@ async def get_category_title(request: CategoryTitleRequest):
         config,
         Density.CATEGORY,
         preset,
+        edit=False,
     )
     response = {"title": title}
 
