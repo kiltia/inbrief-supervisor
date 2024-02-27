@@ -195,7 +195,7 @@ async def fetch(request: FetchRequest):
         await ctx.story_repo.add(story_entities)
 
         entities = []
-        stories: list[tuple[UUID, List[Source]]] = []
+        stories: list[tuple[StoryEntry, List[Source]]] = []
         uuid_num = 0
         for i in range(len(stories_nums[:-1])):
             stories.append((StoryEntry(uuid=story_uuids[uuid_num]), []))
@@ -337,13 +337,14 @@ async def get_category_title(request: CategoryTitleRequest):
     user = (await ctx.user_repo.get("chat_id", request.chat_id))[0]
     preset = (await ctx.preset_repo.get("preset_id", user.cur_preset))[0]
 
-    logger.debug("Started generating tittle for category")
+    logger.debug("Started generating title for category")
     title = await call_summarizer(
         UUID(corr_id),
         request.texts,
         config,
-        Density.TITLE,
+        Density.CATEGORY,
         preset,
+        edit=False,
     )
     response = {"title": title}
 
