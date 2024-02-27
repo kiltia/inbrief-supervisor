@@ -18,7 +18,7 @@ from shared.models import (
 )
 from shared.routes import LinkerRoutes, ScraperRoutes, SummarizerRoutes
 
-logger = logging.getLogger("app")
+logger = logging.getLogger("supervisor")
 
 
 # TODO(nrydanov): Add detailed verification for all possible situations (#80)
@@ -110,7 +110,7 @@ async def call_linker(
                 network_settings.linker_host,
             ),
             json={
-                "entries": data,
+                "entries": [e.model_dump() for e in data],
                 "config": config.model_dump(),
                 "settings": settings["config"],
                 "return_plot_data": return_plot_data,

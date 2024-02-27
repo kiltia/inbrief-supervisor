@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 import api.routes.callback as callback_routes
 import api.routes.config as config_routes
 import api.routes.dashboard as dashboard_routes
+import api.routes.feedback as feedback_routes
 import api.routes.preset as preset_routes
 import api.routes.summary as summary_routes
 import api.routes.user as user_routes
@@ -15,7 +16,7 @@ import httpx
 from api.requests import call_linker, call_scraper, call_summarizer
 from asgi_correlation_id import CorrelationIdMiddleware, correlation_id
 from context import ctx, linking_settings
-from fastapi import FastAPI
+from fastapi import FastAPI, Response, status
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import HTTPException
 from fastapi.responses import JSONResponse
@@ -40,6 +41,7 @@ from shared.models import (
     FetchRequest,
     FetchResponse,
     LinkingConfig,
+    ParseResponse,
     StoryEntry,
     SummarizeRequest,
 )
@@ -65,6 +67,7 @@ app.include_router(dashboard_routes.router)
 app.include_router(preset_routes.router)
 app.include_router(summary_routes.router)
 app.include_router(user_routes.router)
+app.include_router(feedback_routes.router)
 
 app.add_middleware(CorrelationIdMiddleware, validator=None)
 
@@ -81,7 +84,7 @@ async def unhandled_exception_handler(request, exc: Exception):
     )
 
 
-logger = logging.getLogger("app")
+logger = logging.getLogger("supervisor")
 
 
 @app.get("/")
@@ -119,7 +122,7 @@ def link_entity(clusters, texts):
     response_model=FetchResponse,
     responses={204: {"model": None}},
 )
-async def fetch(request: FetchRequest):
+async def fetch(request: FetchRequest, response: Response):
     corr_id = UUID(correlation_id.get())
     time = datetime.now()
     logger.info("Started fetching updates")
@@ -133,6 +136,19 @@ async def fetch(request: FetchRequest):
     if data == []:
         return JSONResponse(
             status_code=204, content={"message": "Nothing was found"}
+        )
+
+    typed_body = TypeAdapter(ParseResponse).validate_python(data)
+    entries = typed_body.sources
+    skipped_channel_ids = typed_body.skipped_channel_ids
+
+    if not entries:
+        response.status_code = status.HTTP_204_NO_CONTENT
+        return {"skipped_channel_ids": skipped_channel_ids}
+
+    if skipped_channel_ids:
+        logger.debug(
+            f"A few channels were skipped by scraper: {skipped_channel_ids}"
         )
 
     categorizer_settings = linking_settings.model_dump()[
@@ -265,6 +281,13 @@ async def fetch(request: FetchRequest):
     return TypeAdapter(FetchResponse).validate_python(
         {"config_id": config.config_id, "categories": categories}
     )
+    return TypeAdapter(FetchResponse).validate_python(
+        {
+            "config_id": config.config_id,
+            "categories": categories,
+            "skipped_channel_ids": skipped_channel_ids,
+        }
+    )
 
 
 @app.post(SupervisorRoutes.SUMMARIZE)
@@ -291,8 +314,6 @@ async def summarize(request: SummarizeRequest):
         if density == Density.TITLE:
             summary = await call_summarizer(
                 UUID(corr_id),
-                [response["summary"][Density.LARGE]["original"]],
-                config,
                 density,
                 preset,
             )
