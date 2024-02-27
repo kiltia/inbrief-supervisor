@@ -134,6 +134,10 @@ async def fetch(request: FetchRequest):
         return JSONResponse(
             status_code=204, content={"message": "Nothing was found"}
         )
+
+    categorizer_settings = linking_settings.model_dump()[
+        config.embedding_source
+    ][config.categorize_method]
     settings = linking_settings.model_dump()[config.embedding_source][
         config.linking_method
     ]
@@ -141,8 +145,8 @@ async def fetch(request: FetchRequest):
     categorizer_config = LinkingConfig(
         embedding_source=EmbeddingSource(config.embedding_source),
         method=ClusteringMethod(config.categorize_method),
-        scorer=settings["scorer"],
-        metric=settings["metric"],
+        scorer=categorizer_settings["scorer"],
+        metric=categorizer_settings["metric"],
     )
 
     linking_config = LinkingConfig(
