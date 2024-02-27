@@ -56,7 +56,7 @@
         "spectral" : {
             "config": {
                 "params_range": {
-                    "n_clusters": [2, 20]
+                    "n_clusters": [2, 30]
                 },
                 "immutable_config": {
                     "eigen_solver": "arpack",
