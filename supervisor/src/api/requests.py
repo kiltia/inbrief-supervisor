@@ -7,10 +7,11 @@ from fastapi import status
 from fastapi.exceptions import HTTPException
 from utils import REQUEST_TIMEOUT, create_url, form_scraper_request
 
-from shared.entities import Config, Preset, Source, User
+from shared.entities import Config, Preset, User
 from shared.models import (
     Density,
     EmbeddingSource,
+    Entry,
     FetchRequest,
     LinkingConfig,
     OpenAIModels,
@@ -92,13 +93,12 @@ async def call_scraper(
 @verifiable_request
 async def call_linker(
     corr_id: UUID,
-    data: list[Source],
+    entries: list[Entry],
     config: LinkingConfig,
     *,
     return_plot_data: bool = False,
 ) -> httpx.Response:
     logger.info("Creating a new linker request")
-
     settings = linking_settings.model_dump()[config.embedding_source.value][
         config.method.value
     ]
@@ -111,7 +111,7 @@ async def call_linker(
                 network_settings.linker_host,
             ),
             json={
-                "entries": [e.model_dump() for e in data],
+                "entries": [e.model_dump() for e in entries],
                 "config": config.model_dump(),
                 "settings": settings["config"],
                 "return_plot_data": return_plot_data,
@@ -129,6 +129,7 @@ async def call_summarizer(
     config: Config,
     density: Density,
     preset: Preset,
+    edit: bool = True,
 ):
     logger.info("Creating a new summarizer request")
     summary_method = (
@@ -145,12 +146,14 @@ async def call_summarizer(
         "summary_method": summary_method,
         "config": {
             "summary_model": summary_model,
-            "editor_config": {
-                "style": preset.editor_prompt,
-                "model": config.editor_model,
-            },
         },
     }
+
+    if edit:
+        body["config"]["editor_config"] = {
+            "style": preset.editor_prompt,
+            "model": config.editor_model,
+        }
 
     async with httpx.AsyncClient() as client:
         response = await client.post(

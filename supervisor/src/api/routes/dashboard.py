@@ -39,11 +39,11 @@ async def get_used_config(uuid: UUID):
     config = configs[0]
 
     settings = linking_settings.model_dump()[config.embedding_source][
-        config.linking_method
+        config.categorize_method
     ]
     return LinkingConfig(
         embedding_source=EmbeddingSource(config.embedding_source),
-        method=ClusteringMethod(config.linking_method),
+        method=ClusteringMethod(config.categorize_method),
         scorer=LinkingScorer(settings["scorer"]),
         metric=DistancesMetric(settings["metric"]),
     )
@@ -53,9 +53,9 @@ async def get_used_config(uuid: UUID):
 async def get_dashboard_data(uuid: UUID, config: LinkingConfig):
     data: list[StorySources] = await ctx.ss_view.get("request_id", uuid)
 
-    entries = list(
+    entries: list[Entry] = list(
         map(
-            lambda x: Entry(text=x.text, embeddings=x.embeddings).model_dump(),
+            lambda x: Entry(text=x.text, embeddings=x.embeddings),
             data,
         )
     )

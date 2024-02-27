@@ -21,5 +21,9 @@ def form_scraper_request(request, embedding_source, channels):
     return body
 
 
+def link_entity(clusters, entity):
+    return list(map(lambda x: list(map(lambda y: entity[y], x)), clusters))
+
+
 def create_url(port, method, host="localhost"):
     return f"http://{host}:{port}{method}"

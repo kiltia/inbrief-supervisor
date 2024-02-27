@@ -1,8 +1,7 @@
 import logging
-import random
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any, List
+from typing import Any
 from uuid import UUID, uuid4
 
 import api.routes.callback as callback_routes
@@ -12,32 +11,36 @@ import api.routes.feedback as feedback_routes
 import api.routes.preset as preset_routes
 import api.routes.summary as summary_routes
 import api.routes.user as user_routes
-import httpx
 from api.requests import call_linker, call_scraper, call_summarizer
 from asgi_correlation_id import CorrelationIdMiddleware, correlation_id
 from context import ctx, linking_settings
 from fastapi import FastAPI, Response, status
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import TypeAdapter
+from utils import link_entity
 
+from db import retrieve_config, save_category_to_db, save_stories_to_db
 from shared.entities import (
     Config,
     Request,
     Source,
-    Story,
-    StorySource,
     StorySources,
     Summary,
 )
 from shared.logger import configure_logging
 from shared.models import (
+    CategoryEntry,
+    CategoryTitleRequest,
     ClusteringMethod,
     Density,
     EmbeddingSource,
     FetchRequest,
+    FetchResponse,
     LinkingConfig,
     ParseResponse,
+    StoryEntry,
     SummarizeRequest,
 )
 from shared.routes import (
@@ -87,124 +90,101 @@ async def hello():
     return {"message": "Supervisor API is running"}
 
 
-@app.post(SupervisorRoutes.FETCH)
+async def clusterize(
+    request_id, embedding_source, clustering_method, entries
+) -> list[tuple[UUID, list[Source]]]:
+    settings = linking_settings.model_dump()[embedding_source][
+        clustering_method
+    ]
+
+    linking_config = LinkingConfig(
+        embedding_source=EmbeddingSource(embedding_source),
+        method=ClusteringMethod(clustering_method),
+        scorer=settings["scorer"],
+        metric=settings["metric"],
+    )
+
+    weights = ctx.shared_settings.config.ranking.weights
+    response = await call_linker(request_id, entries, linking_config)
+    unsorted_category_nums = response["results"][0]["stories_nums"]
+    uuids = [uuid4() for _ in range(len(unsorted_category_nums))]
+    clusters = ctx.ranker.get_sorted(
+        zip(
+            uuids,
+            link_entity(unsorted_category_nums, entries),
+            strict=False,
+        ),
+        weights=weights,
+    )
+
+    return clusters
+
+
+@app.post(
+    SupervisorRoutes.FETCH,
+    response_model=FetchResponse,
+    responses={204: {"model": None}},
+)
 async def fetch(request: FetchRequest, response: Response):
-    corr_id = correlation_id.get()
+    corr_id = UUID(correlation_id.get())
     time = datetime.now()
     logger.info("Started fetching updates")
-    configs: List[Config] = await ctx.config_repo.get()
-    configs = list(filter(lambda config: not config.inactive, configs))
-    if not request.config_id:
-        config = random.choice(configs)
-        logger.debug(f"Using random config ID: {config.config_id}")
-    else:
-        filtered_configs = list(
-            filter(lambda x: x.config_id == request.config_id, configs)
-        )
-        if not filtered_configs:
-            raise HTTPException(
-                httpx.codes.BAD_REQUEST, detail="Bad config ID"
-            )
-        else:
-            config = filtered_configs[0]
-        logger.debug("Using requested config ID: {config.config_id}")
 
-    data = await call_scraper(
+    config = await retrieve_config(request.config_id)
+    response = await call_scraper(
         corr_id, request, EmbeddingSource(config.embedding_source)
     )
 
-    typed_body = TypeAdapter(ParseResponse).validate_python(data)
-    entries = typed_body.sources
-    skipped_channel_ids = typed_body.skipped_channel_ids
+    if response == []:
+        return JSONResponse(
+            status_code=204, content={"message": "Nothing was found"}
+        )
 
-    if not entries:
-        response.status_code = status.HTTP_204_NO_CONTENT
-        return {"skipped_channel_ids": skipped_channel_ids}
+    typed_body = TypeAdapter(ParseResponse).validate_python(response)
+    sources = typed_body.sources
+    skipped_channel_ids = typed_body.skipped_channel_ids
 
     if skipped_channel_ids:
         logger.debug(
             f"A few channels were skipped by scraper: {skipped_channel_ids}"
         )
 
-    settings = linking_settings.model_dump()[config.embedding_source][
-        config.linking_method
-    ]
+    if not sources:
+        response.status_code = status.HTTP_204_NO_CONTENT
+        return {"skipped_channel_ids": skipped_channel_ids}
 
-    linking_config = LinkingConfig(
-        embedding_source=EmbeddingSource(config.embedding_source),
-        method=ClusteringMethod(config.linking_method),
-        scorer=settings["scorer"],
-        metric=settings["metric"],
+    categories = await clusterize(
+        corr_id, config.embedding_source, config.categorize_method, sources
     )
-
-    response = await call_linker(corr_id, entries, linking_config)
-    stories_nums = response["results"][0]["stories_nums"]
-
-    uuids = [
-        uuid4() for _ in range(len(stories_nums) + len(stories_nums[-1]) - 1)
-    ]
-
-    stories_uuids = [
-        Story(story_id=i, request_id=UUID(corr_id)) for i in uuids
-    ]
-    await ctx.story_repo.add(stories_uuids)
-
-    entities = []
-    stories: List[tuple[UUID, List[Source]]] = []
-    uuid_num = 0
-    for i in range(len(stories_nums[:-1])):
-        stories.append((uuids[uuid_num], []))
-        for j in range(len(stories_nums[i])):
-            source = entries[stories_nums[i][j]]
-            entity = StorySource(
-                story_id=uuids[uuid_num],
-                source_id=source.source_id,
-                channel_id=source.channel_id,
-            )
-            entities.append(entity)
-            stories[i][1].append(source)
-
-        uuid_num += 1
-
-    # NOTE(sokunkov): We need to finally decide what we want to do
-    # with the noisy cluster
-    for i in range(len(stories_nums[-1])):
-        stories.append((uuids[uuid_num], []))
-        source = entries[stories_nums[-1][i]]
-        entity = StorySource(
-            story_id=uuids[uuid_num],
-            source_id=source.source_id,
-            channel_id=entries[stories_nums[-1][i]].channel_id,
+    category_entries: list[CategoryEntry] = []
+    for category_id, category in categories:
+        if not category:
+            continue
+        stories = await clusterize(
+            corr_id, config.embedding_source, config.linking_method, category
         )
-        entities.append(entity)
-        stories[-1][1].append(source)
-        uuid_num += 1
+        await save_category_to_db(corr_id, category_id, stories)
 
-    await ctx.ss_repo.add(entities)
+        story_entries: list[StoryEntry] = []
+        for story in stories[:-1]:
+            story_id = story[0]
+            await save_stories_to_db(story_id, story[1])
+            story_entries.append(StoryEntry(uuid=story_id, noise=False))
 
-    weights = ctx.shared_settings.config.ranking.weights
+        noise_ids = [uuid4() for _ in range(len(stories[-1][1]))]
+        for uuid, noise_story in zip(noise_ids, stories[-1][1], strict=True):
+            await save_stories_to_db(uuid, [noise_story])
+            story_entries.append(StoryEntry(uuid=uuid, noise=True))
 
-    stories = list(
-        map(
-            lambda t: (
-                t[0],
-                sorted(
-                    t[1],
-                    key=lambda x: datetime.strptime(x.date, DB_DATE_FORMAT),
-                ),
-            ),
-            stories,
+        category_entries.append(
+            CategoryEntry(uuid=category_id, stories=story_entries)
         )
-    )
 
-    stories = ctx.ranker.get_sorted(stories, weights=weights)
-
-    story_ids = list(map(lambda t: t[0], stories))
     logger.info("Finished fetching updates, sending response")
     elapsed = datetime.now() - time
     request_entity = Request(
         chat_id=request.chat_id,
-        request_id=UUID(corr_id),
+        request_id=corr_id,
         request_type="fetch",
         status="completed",
         time_passed=elapsed,
@@ -212,11 +192,13 @@ async def fetch(request: FetchRequest, response: Response):
     )
     await ctx.request_repo.add(request_entity)
 
-    return {
-        "config_id": config.config_id,
-        "story_ids": story_ids,
-        "skipped_channel_ids": skipped_channel_ids,
-    }
+    return TypeAdapter(FetchResponse).validate_python(
+        {
+            "config_id": config.config_id,
+            "categories": category_entries,
+            "skipped_channel_ids": skipped_channel_ids,
+        }
+    )
 
 
 @app.post(SupervisorRoutes.SUMMARIZE)
@@ -240,18 +222,9 @@ async def summarize(request: SummarizeRequest):
     request.required_density.append(Density.TITLE)
     for density in request.required_density:
         logger.debug(f"Started generating {density.value} summary")
-        if density == Density.TITLE:
-            summary = await call_summarizer(
-                UUID(corr_id),
-                [response["summary"][Density.LARGE]["original"]],
-                config,
-                density,
-                preset,
-            )
-        else:
-            summary = await call_summarizer(
-                UUID(corr_id), story, config, density, preset
-            )
+        summary = await call_summarizer(
+            UUID(corr_id), story, config, density, preset
+        )
         logger.debug(f"Finished generating {density.value} summary")
         response["summary"][density] = summary
 
@@ -278,7 +251,31 @@ async def summarize(request: SummarizeRequest):
     await ctx.summary_repo.add(entities)
 
     response["references"] = list(map(lambda x: x.reference, sources))
-    logger.debug(f"Refs: {response['references']}")
 
     logger.info("Sending response with summarized news")
+    return response
+
+
+@app.post(SupervisorRoutes.CATEGORY_TITLE)
+async def get_category_title(request: CategoryTitleRequest):
+    corr_id = correlation_id.get()
+    logger.info("Started serving category title request")
+    config: Config = (
+        await ctx.config_repo.get("config_id", request.config_id)
+    )[0]
+    user = (await ctx.user_repo.get("chat_id", request.chat_id))[0]
+    preset = (await ctx.preset_repo.get("preset_id", user.cur_preset))[0]
+
+    logger.debug("Started generating title for category")
+    title = await call_summarizer(
+        UUID(corr_id),
+        request.texts,
+        config,
+        Density.CATEGORY,
+        preset,
+        edit=False,
+    )
+    response = {"title": title}
+
+    logger.info("Sending response with category title")
     return response
