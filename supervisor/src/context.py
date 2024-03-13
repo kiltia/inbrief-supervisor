@@ -1,3 +1,5 @@
+import os
+
 from ranking import Ranker, init_scorers
 
 from config import LinkingSettings, NetworkSettings
@@ -28,7 +30,11 @@ class Context:
         self.shared_settings = SharedResources(
             f"{SHARED_CONFIG_PATH}/settings.json"
         )
-        self.pg = Database(create_db_string(self.shared_settings.pg_creds))
+        pg_pswd = os.getenv("POSTGRES_PASSWORD")
+        pg_user = os.getenv("POSTGRES_USER")
+        self.pg = Database(
+            create_db_string(self.shared_settings.pg_creds, pg_pswd, pg_user)
+        )
         self.callback_repository = PgRepository(self.pg, Callback)
         self.preset_view = PgRepository(self.pg, UserPresets)
         self.user_repo = PgRepository(self.pg, User)
