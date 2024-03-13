@@ -1,4 +1,6 @@
+import asyncio
 import logging
+from asyncio import Queue
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
@@ -11,36 +13,32 @@ import api.routes.feedback as feedback_routes
 import api.routes.preset as preset_routes
 import api.routes.summary as summary_routes
 import api.routes.user as user_routes
-from api.requests import call_linker, call_scraper, call_summarizer
+from api.requests import call_scraper, call_summarizer
 from asgi_correlation_id import CorrelationIdMiddleware, correlation_id
-from context import ctx, linking_settings
+from clustering import clusterize
+from context import ctx
 from fastapi import FastAPI, Response, status
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import TypeAdapter
-from utils import link_entity
+from workers import finalize_category_entries, process_categories
 
-from db import retrieve_config, save_category_to_db, save_stories_to_db
+from db import retrieve_config
 from shared.entities import (
     Config,
     Request,
-    Source,
     StorySources,
     Summary,
 )
 from shared.logger import configure_logging
 from shared.models import (
-    CategoryEntry,
     CategoryTitleRequest,
-    ClusteringMethod,
     Density,
     EmbeddingSource,
     FetchRequest,
     FetchResponse,
-    LinkingConfig,
     ParseResponse,
-    StoryEntry,
     SummarizeRequest,
 )
 from shared.routes import (
@@ -90,36 +88,6 @@ async def hello():
     return {"message": "Supervisor API is running"}
 
 
-async def clusterize(
-    request_id, embedding_source, clustering_method, entries
-) -> list[tuple[UUID, list[Source]]]:
-    settings = linking_settings.model_dump()[embedding_source][
-        clustering_method
-    ]
-
-    linking_config = LinkingConfig(
-        embedding_source=EmbeddingSource(embedding_source),
-        method=ClusteringMethod(clustering_method),
-        scorer=settings["scorer"],
-        metric=settings["metric"],
-    )
-
-    weights = ctx.shared_settings.config.ranking.weights
-    response = await call_linker(request_id, entries, linking_config)
-    unsorted_category_nums = response["results"][0]["stories_nums"]
-    uuids = [uuid4() for _ in range(len(unsorted_category_nums))]
-    clusters = ctx.ranker.get_sorted(
-        zip(
-            uuids,
-            link_entity(unsorted_category_nums, entries),
-            strict=False,
-        ),
-        weights=weights,
-    )
-
-    return clusters
-
-
 @app.post(
     SupervisorRoutes.FETCH,
     response_model=FetchResponse,
@@ -156,32 +124,25 @@ async def fetch(request: FetchRequest, response: Response):
     categories = await clusterize(
         corr_id, config.embedding_source, config.categorize_method, sources
     )
-    category_entries: list[CategoryEntry] = []
-    for category_id, category in categories:
-        if not category:
-            continue
-        stories = await clusterize(
-            corr_id, config.embedding_source, config.linking_method, category
-        )
-        await save_category_to_db(corr_id, category_id, stories)
+    index_map: dict[UUID, int] = {
+        uuid: i for i, (uuid, stories) in enumerate(categories) if stories
+    }
+    category_entries = [None] * len(index_map)
+    queue: Queue = Queue()
 
-        story_entries: list[StoryEntry] = []
-        for story in stories[:-1]:
-            story_id = story[0]
-            await save_stories_to_db(story_id, story[1])
-            story_entries.append(StoryEntry(uuid=story_id, noise=False))
+    workers = [
+        process_categories(corr_id, config, categories, queue)
+        for _ in range(ctx.shared_settings.config.category_async_pool_size)
+    ]
+    workers.append(
+        finalize_category_entries(queue, category_entries, index_map)
+    )
+    await asyncio.gather(*workers)
 
-        noise_ids = [uuid4() for _ in range(len(stories[-1][1]))]
-        for uuid, noise_story in zip(noise_ids, stories[-1][1], strict=True):
-            await save_stories_to_db(uuid, [noise_story])
-            story_entries.append(StoryEntry(uuid=uuid, noise=True))
-
-        category_entries.append(
-            CategoryEntry(uuid=category_id, stories=story_entries)
-        )
-
-    logger.info("Finished fetching updates, sending response")
     elapsed = datetime.now() - time
+    logger.info(
+        f"Finished fetching updates, sending response. Time elapsed: {elapsed}"
+    )
     request_entity = Request(
         chat_id=request.chat_id,
         request_id=corr_id,
