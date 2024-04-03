@@ -7,7 +7,10 @@ from fastapi import status
 from fastapi.exceptions import HTTPException
 from utils import REQUEST_TIMEOUT, create_url, form_scraper_request
 
-from shared.entities import Config, Preset, User
+from shared.entities import (
+    Config,
+    Preset,
+)
 from shared.models import (
     Density,
     EmbeddingSource,
@@ -62,10 +65,8 @@ async def call_scraper(
     )
     logger.info("Creating a new scraper request")
 
-    user: User = (await ctx.user_repo.get("chat_id", request.chat_id))[0]
-
     preset: Preset = (
-        await ctx.preset_repo.get("preset_id", str(user.cur_preset))
+        await ctx.preset_repo.get("preset_id", str(request.preset_id))
     )[0]
 
     async with httpx.AsyncClient() as client:

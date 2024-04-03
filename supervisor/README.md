@@ -179,30 +179,6 @@ Response body:
 ]
 ```
 
-### PATCH /api/user/{chat\_id}/presets
-
-This endpoint is designed to change current preset for a giving user
-
-#### Example request
-
-Path parameters:
-
-- `chat_id (int)` — unique Telegram chat ID
-
-Request body:
-
-- `cur_preset (UUID)` — unique id of preset
-
-```
-{
-  "cur_preset": "98fc845c-02a1-4084-b365-3fa5386fecba"
-}
-```
-
-### Example response
-
-OK 204
-
 ### PATCH /api/preset 
 
 This endpoint can be used to edit any parameters of existing preset —

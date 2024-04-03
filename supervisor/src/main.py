@@ -171,8 +171,7 @@ async def summarize(request: SummarizeRequest):
     config: Config = (
         await ctx.config_repo.get("config_id", request.config_id)
     )[0]
-    user = (await ctx.user_repo.get("chat_id", request.chat_id))[0]
-    preset = (await ctx.preset_repo.get("preset_id", user.cur_preset))[0]
+    preset = (await ctx.preset_repo.get("preset_id", request.preset_id))[0]
     sources: list[StorySources] = await ctx.ss_view.get(
         "story_id", request.story_id
     )
@@ -224,8 +223,7 @@ async def get_category_title(request: CategoryTitleRequest):
     config: Config = (
         await ctx.config_repo.get("config_id", request.config_id)
     )[0]
-    user = (await ctx.user_repo.get("chat_id", request.chat_id))[0]
-    preset = (await ctx.preset_repo.get("preset_id", user.cur_preset))[0]
+    preset = (await ctx.preset_repo.get("preset_id", request.preset_id))[0]
 
     logger.debug("Started generating title for category")
     title = await call_summarizer(

@@ -8,8 +8,8 @@ from fastapi import APIRouter
 from pydantic import TypeAdapter
 from utils import create_url
 
-from shared.entities import Preset, User, UserPreset
-from shared.models import ChangePresetRequest, PartialPresetUpdate, PresetData
+from shared.entities import Preset, UserPreset
+from shared.models import PartialPresetUpdate, PresetData
 from shared.routes import ScraperRoutes, SupervisorRoutes
 from shared.utils import DB_DATE_FORMAT
 
@@ -20,16 +20,7 @@ router = APIRouter()
 async def get_presets(chat_id: int):
     response: dict[str, Any] = {}
     response["presets"] = await ctx.preset_view.get("chat_id", chat_id)
-    user: list[User] = await ctx.user_repo.get("chat_id", chat_id)
-    response["cur_preset"] = user[0].cur_preset
     return response
-
-
-@router.patch(SupervisorRoutes.USER + "/{chat_id}/presets", status_code=204)
-async def change_preset(chat_id: int, request: ChangePresetRequest):
-    user: User = (await ctx.user_repo.get("chat_id", chat_id))[0]
-    user.cur_preset = request.cur_preset
-    await ctx.user_repo.update(user, fields=["cur_preset"])
 
 
 @router.patch(SupervisorRoutes.PRESET, status_code=204)
