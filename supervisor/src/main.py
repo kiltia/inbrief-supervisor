@@ -17,9 +17,12 @@ from api.requests import call_scraper, call_summarizer
 from asgi_correlation_id import CorrelationIdMiddleware, correlation_id
 from clustering import clusterize
 from context import ctx
+from exceptions import (
+    ComponentException,
+    component_exception_handler,
+    supervisor_exception_handler,
+)
 from fastapi import FastAPI, Response, status
-from fastapi.exception_handlers import http_exception_handler
-from fastapi.exceptions import HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import TypeAdapter
 from workers import finalize_category_entries, process_categories
@@ -67,17 +70,8 @@ app.include_router(feedback_routes.router)
 
 app.add_middleware(CorrelationIdMiddleware, validator=None)
 
-
-@app.exception_handler(Exception)
-async def unhandled_exception_handler(request, exc: Exception):
-    return await http_exception_handler(
-        request,
-        HTTPException(
-            500,
-            "Internal server error",
-            headers={"X-Request-ID": correlation_id.get() or ""},
-        ),
-    )
+app.add_exception_handler(ComponentException, component_exception_handler)
+app.add_exception_handler(Exception, supervisor_exception_handler)
 
 
 logger = logging.getLogger("supervisor")

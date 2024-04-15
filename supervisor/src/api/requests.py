@@ -1,8 +1,10 @@
 import logging
+import traceback
 from uuid import UUID
 
 import httpx
 from context import ctx, linking_settings, network_settings
+from exceptions import ComponentException
 from fastapi import status
 from fastapi.exceptions import HTTPException
 from utils import REQUEST_TIMEOUT, create_url, form_scraper_request
@@ -28,26 +30,34 @@ logger = logging.getLogger("supervisor")
 # TODO(nrydanov): Add detailed verification for all possible situations (#80)
 def verifiable_request(call):
     async def wrapper(*args, **kwargs) -> dict:
-        response = await call(*args, **kwargs)
-        match response.status_code:
-            case status.HTTP_200_OK:
-                return response.json()
-            case status.HTTP_204_NO_CONTENT:
-                logger.warning(
-                    f"Got no content response after calling to {call.__name__}"
-                )
-                raise HTTPException(
-                    status.HTTP_204_NO_CONTENT,
-                    detail=f"{call.__name__} returned no content response",
-                )
-            case _:
-                logger.error(
-                    f"Got {response.status_code} after calling to {call.__name__}"
-                )
-                raise HTTPException(
-                    status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"{call.__name__} is unavailable at the moment.",
-                )
+        component_name = call.__name__[5:].upper()
+        try:
+            response = await call(*args, **kwargs)
+
+            match response.status_code:
+                case status.HTTP_200_OK:
+                    return response.json()
+                case status.HTTP_204_NO_CONTENT:
+                    logger.warning(
+                        f"Got no content response after sending request to {component_name}"
+                    )
+                    raise HTTPException(
+                        status.HTTP_204_NO_CONTENT,
+                        detail=f"{call.__name__} returned no content response",
+                    )
+                case _:
+                    logger.error(
+                        f"Got {response.status_code} after sending request to {component_name}"
+                    )
+                    code = response.status_code
+                    debug = response.json()
+                    error = debug["error"]
+        except Exception as e:
+            logger.error(f"Error sending request to {component_name}")
+            code = None
+            debug = {"error": traceback.format_exception(e)}
+            error = type(e).__name__
+        raise ComponentException(component_name, code, error, debug)
 
     return wrapper
 
