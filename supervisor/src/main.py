@@ -11,6 +11,7 @@ import api.routes.config as config_routes
 import api.routes.dashboard as dashboard_routes
 import api.routes.feedback as feedback_routes
 import api.routes.preset as preset_routes
+import api.routes.schedule as schedule_routes
 import api.routes.summary as summary_routes
 import api.routes.user as user_routes
 from api.requests import call_scraper, call_summarizer
@@ -54,8 +55,21 @@ from shared.utils import DB_DATE_FORMAT
 async def lifespan(app: FastAPI):
     configure_logging()
     await ctx.init_db()
+    await ctx.start_scheduler()
     yield
-    await ctx.dispose_db()
+    shutdown_tasks = [
+        ctx.stop_scheduler(),
+        ctx.dispose_db(),
+    ]
+    logger.debug("Waiting for running tasks to stop")
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(*shutdown_tasks),
+            ctx.shared_settings.config.scheduler.shutdown_timeout,
+        )
+        logger.debug("All running tasks are stopped")
+    except asyncio.TimeoutError:
+        logger.warn("Timed out cancelling running tasks, force exiting")
 
 
 app = FastAPI(lifespan=lifespan)
@@ -67,6 +81,7 @@ app.include_router(preset_routes.router)
 app.include_router(summary_routes.router)
 app.include_router(user_routes.router)
 app.include_router(feedback_routes.router)
+app.include_router(schedule_routes.router)
 
 app.add_middleware(CorrelationIdMiddleware, validator=None)
 
