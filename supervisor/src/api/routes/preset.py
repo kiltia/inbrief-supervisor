@@ -42,7 +42,7 @@ async def update_preset(request: PartialPresetUpdate):
     )
 
 
-@router.post(SupervisorRoutes.PRESET, status_code=204)
+@router.post(SupervisorRoutes.PRESET, status_code=200)
 async def add_preset(chat_id: int, preset: PresetData):
     preset_id = uuid4()
     async with httpx.AsyncClient() as client:
@@ -62,3 +62,4 @@ async def add_preset(chat_id: int, preset: PresetData):
         ),
     )
     await ctx.up_repo.add(UserPreset(chat_id=chat_id, preset_id=preset_id))
+    return {"preset_id": preset_id}

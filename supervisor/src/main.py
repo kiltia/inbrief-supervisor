@@ -17,13 +17,14 @@ import api.routes.user as user_routes
 from api.requests import call_scraper, call_summarizer
 from asgi_correlation_id import CorrelationIdMiddleware, correlation_id
 from clustering import clusterize
-from context import ctx
+from context import ctx, network_settings
 from exceptions import (
     ComponentException,
     component_exception_handler,
     supervisor_exception_handler,
 )
 from fastapi import FastAPI, Response, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import TypeAdapter
 from workers import finalize_category_entries, process_categories
@@ -84,6 +85,35 @@ app.include_router(feedback_routes.router)
 app.include_router(schedule_routes.router)
 
 app.add_middleware(CorrelationIdMiddleware, validator=None)
+
+origins = [network_settings.webapp_origin]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["POST", "GET", "OPTIONS", "PATCH"],
+    allow_headers=[
+        "Content-Type",
+        "Acces-Control-Allow_-Headers",
+        "Access-Control-Allow-Origin",
+        "x-request-id",
+    ],
+)
+origins = [network_settings.webapp_origin]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["POST", "GET", "OPTIONS", "PATCH"],
+    allow_headers=[
+        "Content-Type",
+        "Acces-Control-Allow_-Headers",
+        "Access-Control-Allow-Origin",
+        "x-request-id",
+    ],
+)
 
 app.add_exception_handler(ComponentException, component_exception_handler)
 app.add_exception_handler(Exception, supervisor_exception_handler)

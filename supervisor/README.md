@@ -5,7 +5,6 @@ data between all other services.
 
 ![arch](../docs/arch.png "Top-level-architecture")
 
-
 ## Configuration
 
 As this service needs to send requests to other services, there's a `network.cfg`
@@ -15,9 +14,8 @@ You don't need to change this file until you want to run some services outside
 container network — if so, you need to change host and port to one's that
 you use.
 
-There's also a configuration of linking methods hyperparameters for 
+There's also a configuration of linking methods hyperparameters for
 Linker service in `linker_config.json` file depending on embedding source.
-
 
 ## Building container
 
@@ -26,16 +24,18 @@ To build just use `sh build.sh` in the project root.
 ## Running
 
 This application is built using FastAPI, so you may use
+
 ```
 uvicorn --app-dir=src main:app [--reload]
 ```
+
 command in service root directory.
 
 NOTE: running this outside of container requires changing corresponding host
-and port in Supervisor service configuration. 
+and port in Supervisor service configuration.
 
 Since this service is a part of InBrief project, you may use `docker compose up scraper`
-in any child directory. 
+in any child directory.
 
 ## API
 
@@ -49,6 +49,7 @@ groups called stories.
 #### Example request
 
 Request body:
+
 - `chat_id (int)` — unique Telegram chat ID
 - `end_date (date)` — the latest message date
 - `offset_date (date)` — the most recent message date
@@ -66,9 +67,10 @@ Request body:
 OK 200
 
 Request body:
-- `config_id (int)` — ID of user config for summarization 
+
+- `config_id (int)` — ID of user config for summarization
 - `story_ids (List[UUID])` — list of story IDs to be passed to `/api/summarize`
-endpoint
+  endpoint
 
 ```
 {
@@ -89,10 +91,11 @@ densities.
 #### Example request
 
 Request body:
+
 - `chat_id (int)` — unique Telegram chat ID
 - `config_id (int)` — ID of config given in response of API fetch method
 - `story_id (UUID)` — unique story ID given in response of API fetch method
-- `required_density (List[Enum])` — list of required density 
+- `required_density (List[Enum])` — list of required density
 
 ```
 {
@@ -110,6 +113,7 @@ Request body:
 OK 200
 
 Response body:
+
 ```
 {
   "large": {
@@ -136,6 +140,7 @@ This endpoint designed to register a new user.
 #### Example request
 
 Request body:
+
 - `chat_id (int)` — unique Telegram chat ID
 
 ```
@@ -148,7 +153,7 @@ Request body:
 
 OK 204
 
-### GET /api/user/{chat\_id}/presets
+### GET /api/user/{chat_id}/presets
 
 This endpoint help front-end with retrieving all presets for a giving user.
 
@@ -163,6 +168,7 @@ Path parameters:
 OK 200
 
 Response body:
+
 - `chat_id (int)` — unique Telegram chat ID.
 - `chat_folder_link (str)` — link to chat folder with user channels
 - `editor_prompt` — additional prompt to be passed to editor service
@@ -179,7 +185,31 @@ Response body:
 ]
 ```
 
-### PATCH /api/preset 
+### PATCH /api/user/{chat_id}/presets
+
+This endpoint is designed to change current preset for a giving user
+
+#### Example request
+
+Path parameters:
+
+- `chat_id (int)` — unique Telegram chat ID
+
+Request body:
+
+- `cur_preset (UUID)` — unique id of preset
+
+```
+{
+  "cur_preset": "98fc845c-02a1-4084-b365-3fa5386fecba"
+}
+```
+
+### Example response
+
+OK 204
+
+### PATCH /api/preset
 
 This endpoint can be used to edit any parameters of existing preset —
 change its name, editor prompt message and even make in inactive.
@@ -187,9 +217,11 @@ change its name, editor prompt message and even make in inactive.
 #### Example request
 
 Query parameters:
+
 - `chat_id (int)` — unique Telegram chat ID
 
 Request body:
+
 - `preset_id (uuid | None)` — unique preset ID
 - `preset_name (str | None)` — name of preset
 - `chat_folder_link (str | None)` — chat folder link
@@ -217,10 +249,12 @@ This endpoints allows creating new presets for certain user.
 
 #### Example request
 
-Query parameters: 
+Query parameters:
+
 - `chat_id`
 
 Request body:
+
 ```
 {
   "preset_name": "some_preset",
@@ -231,13 +265,20 @@ Request body:
 
 #### Example response
 
-OK 204
+Request body:
+
+```
+{
+  "preset_id": "c1acc910-5fa2-49fa-9905-80be0af614eb"
+}
+```
 
 ### POST /api/callback
 
 #### Example request
 
 Request body:
+
 ```
 {
   "callback_data": some_valid_json
@@ -251,6 +292,7 @@ OK 204
 ### PATCH /api/callback
 
 Request body:
+
 ```
 {
   "callback_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
@@ -266,9 +308,9 @@ OK 204
 
 #### Example request
 
-Path parameters: 
-- `callback_id` — unique callback ID
+Path parameters:
 
+- `callback_id` — unique callback ID
 
 #### Example response
 

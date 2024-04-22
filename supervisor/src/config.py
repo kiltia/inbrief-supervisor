@@ -13,6 +13,7 @@ class NetworkSettings(BaseSettings):
     summarizer_host: str
     scraper_host: str
     editor_host: str
+    webapp_origin: str
 
     def __init__(self, _env_file: str):
         super().__init__(_env_file=_env_file)
