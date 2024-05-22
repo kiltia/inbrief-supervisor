@@ -14,10 +14,10 @@ RUN curl -sSf https://rye-up.com/get | RYE_INSTALL_OPTION="--yes" \
 && rye config --set-bool behavior.use-uv=true --set-bool autosync=false
 
 
-COPY README.md README.md
-COPY .python-version .python-version
-COPY pyproject.toml pyproject.toml
-COPY requirements.lock* requirements.lock
+COPY supervisor/README.md README.md
+COPY supervisor/.python-version .python-version
+COPY supervisor/pyproject.toml pyproject.toml
+COPY supervisor/requirements.lock* requirements.lock
 
 COPY shared shared
 RUN rye add shared --path ./shared
@@ -38,6 +38,5 @@ ENV PYTHONPATH="$PYTHONPATH:$WD_NAME/.venv/lib/python3.11/site-packages"
 COPY --from=builder /opt/rye /opt/rye
 COPY --from=builder $WD_NAME/.venv .venv
 COPY --from=builder $WD_NAME/shared shared
-COPY --from=builder $WD_NAME/openai_api openai_api
-COPY src src
+COPY supervisor/src src
 ENTRYPOINT ["uvicorn", "--app-dir", "src", "--host", "0.0.0.0", "main:app"]
